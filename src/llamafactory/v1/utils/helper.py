@@ -58,16 +58,23 @@ def _pad_and_truncate(tensor: Tensor, max_seqlen: int, pad_value: int = 0) -> Te
 def pad_and_truncate(samples: list[ModelInput], max_seqlen: int) -> list[BatchInput]:
     max_length = min(max(len(sample["input_ids"]) for sample in samples), max_seqlen)
     padded_samples = []
+    sequence_keys = {
+        "input_ids",
+        "attention_mask",
+        "labels",
+        "loss_weights",
+        "position_ids",
+        "token_type_ids",
+    }
     for sample in samples:
         padded_sample = {}
         for key, value in sample.items():
-            if "label" in key:
-                pad_value = IGNORE_INDEX
-            else:
-                pad_value = 0
-
-            if not isinstance(value, str):
-                padded_sample[key] = _pad_and_truncate(torch.tensor(value), max_length, pad_value)
+            if key in sequence_keys:
+                pad_value = IGNORE_INDEX if "label" in key else 0
+                if torch.is_tensor(value):
+                    padded_sample[key] = _pad_and_truncate(value, max_length, pad_value)
+                else:
+                    padded_sample[key] = _pad_and_truncate(torch.tensor(value), max_length, pad_value)
             else:
                 padded_sample[key] = value
 

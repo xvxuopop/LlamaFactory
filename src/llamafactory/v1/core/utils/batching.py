@@ -54,7 +54,14 @@ def default_collate_fn(buffer: StatefulBuffer, batch_info: BatchInfo) -> list[Ba
     batch = []
     for i in range(num_micro_batch):
         micro_batch = samples[i * micro_batch_size : (i + 1) * micro_batch_size]
-        batch.append(default_collate(pad_and_truncate(micro_batch, cutoff_len)))
+        a = default_collate(pad_and_truncate(micro_batch, cutoff_len))
+        # a["pixel_values"] = a["pixel_values"].flatten(0, 1)
+        # a["image_grid_thw"] = a["image_grid_thw"].flatten(0, 1)
+        # a["pixel_values_videos"] = a["pixel_values_videos"].flatten(0, 1)
+        # a["video_grid_thw"] = a["video_grid_thw"].flatten(0, 1)
+        a["input_features"] = a["input_features"].flatten(0, 1)
+        a["feature_attention_mask"] = a["feature_attention_mask"].flatten(0, 1)
+        batch.append(a)
 
     return batch
 
@@ -177,6 +184,7 @@ class BatchGenerator(Iterator):
             while len(self._buffer) < self.micro_batch_size * self.num_micro_batch:
                 try:
                     samples: list[ModelInput] = next(self._data_iter)
+
                 except StopIteration:
                     break
 

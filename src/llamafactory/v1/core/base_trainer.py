@@ -145,10 +145,23 @@ class BaseTrainer:
 
         log_probs: Tensor of shape (batch_size, seq_len - 1)
         """
+        model_dtype = None
+        for param in self.model.parameters():
+            model_dtype = param.dtype
+            break
+
         batch_size, _ = batch["labels"].shape
-        model_inputs = {
-            k: v.to(self.device, non_blocking=True) for k, v in batch.items() if k in self.model_input_names
-        }
+        model_inputs = {}
+        for key, value in batch.items():
+            if key not in self.model_input_names:
+                continue
+            if torch.is_tensor(value):
+                if model_dtype is not None and torch.is_floating_point(value) and value.dtype != model_dtype:
+                    model_inputs[key] = value.to(self.device, dtype=model_dtype, non_blocking=True)
+                else:
+                    model_inputs[key] = value.to(self.device, non_blocking=True)
+            else:
+                model_inputs[key] = value
         labels = batch["labels"].to(self.device, non_blocking=True)
         outputs: ModelOutput = model(**model_inputs)
         logits = outputs.logits.float()

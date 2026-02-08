@@ -4,7 +4,7 @@
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0 
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,58 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import importlib
 import json
 import re
-from pathlib import Path
 
-from ...utils import logging
-from ...utils.constants import IGNORE_INDEX
-from ...utils.helper import get_tokenizer
-from ...utils.plugin import BasePlugin
-from ...utils.types import Message, ModelInput, Processor, ToolCall
-
-logger = logging.get_logger(__name__)
-
-
-class RenderingPlugin(BasePlugin):
-    def render_messages(
-        self,
-        processor: Processor,
-        messages: list[Message],
-        tools: str | None = None,
-        is_generate: bool = False,
-    ) -> ModelInput:
-        """Render messages in the template format."""
-        return self["render_messages"](processor, messages, tools, is_generate)
-
-    def parse_messages(self, generated_text: str) -> Message:
-        """Parse messages in the template format."""
-        return self["parse_messages"](generated_text)
-
-
-def _update_model_input(
-    processor: Processor,
-    input_ids: list[int],
-    labels: list[int],
-    loss_weights: list[int],
-    temp_str: str,
-    temp_weight: float,
-) -> str:
-    """Update model input with temporary string."""
-    if not temp_str:
-        return ""
-
-    tokenizer = get_tokenizer(processor)
-    temp_ids = tokenizer.encode(temp_str, add_special_tokens=False)
-    input_ids.extend(temp_ids)
-    loss_weights.extend([temp_weight] * len(temp_ids))
-    if temp_weight > 1e-6:
-        labels.extend(temp_ids)
-    else:
-        labels.extend([IGNORE_INDEX] * len(temp_ids))
-
-    return ""
+from llamafactory.v1.plugins.model_plugins.rendering import RenderingPlugin, _update_model_input
+from llamafactory.v1.utils.types import Message, ModelInput, Processor, ToolCall
 
 
 @RenderingPlugin("qwen3_nothink").register("render_messages")
@@ -72,10 +25,11 @@ def render_qwen3_nothink_messages(
     messages: list[Message],
     tools: str | None = None,
     is_generate: bool = False,
+    enable_thinking: bool = False,
 ) -> ModelInput:
     """Render messages in the Qwen3 nothink template format.
 
-    See https://huggingface.co/spaces/huggingfacejs/chat-template-playground?modelId=Qwen/Qwen3-4B-Instruct-2507
+    See https://huggingface.co/spaces/huggingfacejs/chat-template-playground?modelId=Qwen/Qwen3-4B-Instruct-2507 
     """
     input_ids, labels, loss_weights = [], [], []
     temp_str, temp_weight = "", 0.0
@@ -95,6 +49,7 @@ def render_qwen3_nothink_messages(
             "# Tools\n\nYou may call one or more functions to assist with the user query.\n\n"
             "You are provided with function signatures within <tools></tools> XML tags:\n<tools>"
         )
+
         try:
             tools = json.loads(tools)
         except json.JSONDecodeError:
@@ -211,6 +166,7 @@ def parse_qwen3_nothink_message(generated_text: str) -> Message:
     pattern = re.compile(r"<(thinking|tool_call)>\s*(.*?)\s*</\1>\s*", re.DOTALL)
     content = []
     last_end = 0
+    # breakpoint()
     for match in pattern.finditer(generated_text):
         start, end = match.span()
         if start > last_end:
@@ -240,24 +196,108 @@ def parse_qwen3_nothink_message(generated_text: str) -> Message:
     return Message(role="assistant", content=content)
 
 
-def scan_all_templates() -> None:
-    """Import and register all templates in the templates directory."""
-    templates_path = Path(__file__).parent / "templates"
-    if not templates_path.exists():
-        return
+if __name__ == "__main__":
+    from transformers import AutoProcessor, AutoTokenizer
+    
+    processor = AutoProcessor.from_pretrained(
+        "/home/j30074199/models/Qwen3-8b-vl",
+        trust_remote_code=True,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(
+        "/home/j30074199/models/Qwen3-8b-vl",
+        trust_remote_code=True,
+    )
 
-    base_package = f"{__package__}.templates"
-    for file_path in templates_path.rglob("*.py"):
-        if file_path.name == "__init__.py":
-            continue
+    sample_base = {
+        "messages": [
+            {
+            "role": 'system',
+            "content": [{"type": "text", "value": "You are a helpful assistant."}],
+            },
+            {
+            "role": 'user',
+            "content": [{"type": "text", "value": "Hello, how are you?"}],
+            },
+            {
+            "role": 'assistant',
+            "content": [{"type": "text", "value": "I'm doing great. How can I help you today?"}],
+            },
+            {
+            "role": 'user',
+            "content": [{"type": "text", "value": "Can you tell me a joke?"}],
+            },
+        ],
+        "add_generation_prompt": False,
+    }
 
-        rel_path = file_path.relative_to(templates_path)
-        module_name = ".".join(rel_path.parts)[:-3]
-        full_module_name = f"{base_package}.{module_name}"
-        try:
-            importlib.import_module(full_module_name)
-        except Exception as exc:
-            logger.warning(f"[Template Registry] Failed to import {full_module_name}: {exc}")
+    sample_reasoning = {
+        "messages": [
+            {
+            "role": 'system',
+            "content": [{"type": "text", "value": "You are a helpful assistant."}],
+            },
+            {
+            "role": 'user',
+            "content": [{"type": "text", "value": "What is the capital of France?"}],
+            },
+            {
+            "role": 'assistant',
+            "content": [{"type": "text", "value": "<think>The user is asking for the capital of France. This is a factual question. I know this information.</think>The capital of France is Paris."}],
+            },
+            {
+            "role": 'user',
+            "content": [{"type": "text", "value": "What about Chile?"}],
+            },
+        ],
+        "add_generation_prompt": False,
+    }
+    
+    sample_tool_usage = {
+        "messages": [
+            {
+            "role": 'system',
+            "content": [{"type": "text", "value": "You are a helpful assistant that can use tools to get information for the user."}],
+            },
+            {
+            "role": 'user',
+            "content": [{"type": "text", "value": "What's the weather like in New York?"}],
+            },
+            {
+            "role": 'assistant',
+            "content": [
+                {"type": "text", "value": "<think>\nThe user is asking about the weather in New York. I should use the weather tool to get this information.\n</think>\nI'll check the current weather in New York for you."},
+                {"type": "tool_call", "value": """{"name": "get_weather", "arguments": {"location": "New York", "unit": "celsius"}}"""}
+                ],
+            },
+            {
+            "role": 'user',
+            "content": [{"type": "text", "value": """<tool_response>\n{"temperature": 22, "condition": "Sunny", "humidity": 45, "wind_speed": 10}\n</tool_response>"""}],
+            },
+            {
+            "role": 'assistant',
+            "content": [{"type": "text", "value": "The weather in New York is currently sunny with a temperature of 22°C. The humidity is at 45% with a wind speed of 10 km/h. It's a great day to be outside!"}],
+            },
+            {
+            "role": 'user',
+            "content": [{"type": "text", "value": "Thanks! What about Boston?"}],
+            },
+        ],
+        "add_generation_prompt": False,
+    }
 
-
-scan_all_templates()
+    tools = """{"name": "get_weather", "description": "Get current weather information for a location", "parameters": {"type": "object", "properties": {"location": {"type": "string", "description": "The city and state, e.g. San Francisco, CA"}, "unit": {"type": "string", "enum": ["celsius", "fahrenheit"], "description": "The unit of temperature to use"}}, "required": ["location"]}}"""
+    
+    rendered_output_base = RenderingPlugin("qwen3_nothink").render_messages(processor, sample_base["messages"])
+    rendered_output_reasoning = RenderingPlugin("qwen3_nothink").render_messages(processor, sample_reasoning["messages"])
+    rendered_output_tool_usage = RenderingPlugin("qwen3_nothink").render_messages(processor, sample_tool_usage["messages"], tools=tools)
+    text_output_base = tokenizer.decode(rendered_output_base["input_ids"])
+    text_output_reasoning = tokenizer.decode(rendered_output_reasoning["input_ids"])
+    text_output_tool_usage = tokenizer.decode(rendered_output_tool_usage["input_ids"])
+    print("sample_base: \n", text_output_base, sep="")
+    print("sample_reasoning: \n", text_output_reasoning, sep="")
+    print("sample_tool_usage: \n", text_output_tool_usage, sep="")
+    print("-" * 50)
+    generated_text1 = "<|im_start|>assistant\nI'm doing great. How can I help you today?<|im_end|>"
+    generated_text2 = """<think>\nThe user is asking about the weather in New York. I should use the weather tool to get this information.\n</think>\nI'll check the current weather in New York for you.\n<tool_call>\n{"name": "get_weather", "arguments": {"location": "New York", "unit": "celsius"}}\n</tool_call>"""
+    parse_text = RenderingPlugin("qwen3_nothink").parse_message(generated_text2)
+    print(parse_text)
