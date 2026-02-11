@@ -26,6 +26,7 @@
 from collections.abc import Iterator
 from typing import Any
 
+import torch
 from torch.utils.data import default_collate
 from torchdata.stateful_dataloader import StatefulDataLoader
 from torchdata.stateful_dataloader.sampler import StatefulDistributedSampler
@@ -33,13 +34,36 @@ from torchdata.stateful_dataloader.sampler import StatefulDistributedSampler
 from ...accelerator.interface import Dim, DistributedInterface
 from ...config import BatchingStrategy
 from ...utils import logging
-from ...utils.helper import pad_and_truncate
+from ...utils.helper import MM_TENSOR_KEYS, SEQUENCE_KEYS, pad_and_truncate
 from ...utils.objects import StatefulBuffer
 from ...utils.types import BatchInfo, BatchInput, ModelInput, TorchDataset
 from .rendering import Renderer
 
 
 logger = logging.get_logger(__name__)
+
+
+def collate(samples: list[BatchInput]) -> BatchInput:
+    collated: BatchInput = {}
+
+    for key in SEQUENCE_KEYS:
+        values = [sample[key] for sample in samples if key in sample]
+        if not values:
+            continue
+
+        if len(values) != len(samples):
+            raise ValueError(f"Missing sequence key `{key}` in collate.")
+
+        collated[key] = default_collate(values)
+
+    for key in MM_TENSOR_KEYS:
+        values = [sample[key] for sample in samples if key in sample]
+        if not values:
+            continue
+
+        collated[key] = torch.cat(values, dim=0)
+
+    return collated
 
 
 def default_collate_fn(buffer: StatefulBuffer, batch_info: BatchInfo) -> list[BatchInput] | None:
@@ -54,7 +78,7 @@ def default_collate_fn(buffer: StatefulBuffer, batch_info: BatchInfo) -> list[Ba
     batch = []
     for i in range(num_micro_batch):
         micro_batch = samples[i * micro_batch_size : (i + 1) * micro_batch_size]
-        batch.append(default_collate(pad_and_truncate(micro_batch, cutoff_len)))
+        batch.append(collate(pad_and_truncate(micro_batch, cutoff_len)))
 
     return batch
 

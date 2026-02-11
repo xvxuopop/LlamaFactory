@@ -85,7 +85,7 @@ class DistributedConfig(TypedDict, total=False):
 
 
 class Content(TypedDict):
-    type: Literal["text", "reasoning", "tool_call", "image_url"]
+    type: Literal["text", "reasoning", "tool_call", "image_url", "video_url", "audio_url"]
     """Type of the content."""
     value: str
     """Value of the content."""
@@ -147,6 +147,22 @@ class ModelInput(TypedDict, total=False):
     """Position ids for the model (optional)."""
     token_type_ids: NotRequired[list[int]]
     """Token type ids used in DPO, 1 represents the chosen messages, 2 represents the rejected messages."""
+    pixel_values: NotRequired[Tensor]
+    """Image inputs for multimodal models."""
+    image_grid_thw: NotRequired[Tensor]
+    """Image grid shape (thw) for multimodal models."""
+    pixel_values_videos: NotRequired[Tensor]
+    """Video inputs for multimodal models."""
+    video_grid_thw: NotRequired[Tensor]
+    """Video grid shape (thw) for multimodal models."""
+    second_per_grid_ts: NotRequired[Tensor | list[float]]
+    """Seconds per grid for videos."""
+    video_second_per_grid: NotRequired[Tensor | list[float]]
+    """Seconds per grid for videos."""
+    input_features: NotRequired[Tensor]
+    """Input features for multimodal models."""
+    feature_attention_mask: NotRequired[Tensor]
+    """Attention mask for input features."""
 
 
 class BatchInput(TypedDict, total=False):
@@ -162,6 +178,22 @@ class BatchInput(TypedDict, total=False):
     """Position ids for the model (optional)."""
     token_type_ids: NotRequired[Tensor]
     """Token type ids used in DPO, 1 represents the chosen messages, 2 represents the rejected messages."""
+    pixel_values: NotRequired[Tensor]
+    """Image inputs for multimodal models."""
+    image_grid_thw: NotRequired[Tensor]
+    """Image grid shape (thw) for multimodal models."""
+    pixel_values_videos: NotRequired[Tensor]
+    """Video inputs for multimodal models."""
+    video_grid_thw: NotRequired[Tensor]
+    """Video grid shape (thw) for multimodal models."""
+    second_per_grid_ts: NotRequired[Tensor]
+    """Seconds per grid for videos."""
+    video_second_per_grid: NotRequired[Tensor]
+    """Seconds per grid for videos."""
+    input_features: NotRequired[Tensor]
+    """Input features for multimodal models."""
+    feature_attention_mask: NotRequired[Tensor]
+    """Attention mask for input features."""
 
 
 class BatchInfo(TypedDict):

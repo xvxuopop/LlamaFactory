@@ -20,6 +20,30 @@ from ..accelerator.interface import DistributedInterface
 from .constants import IGNORE_INDEX
 from .types import BatchInput, ModelInput, Processor, Tensor
 
+SEQUENCE_KEYS = frozenset(
+    {
+        "input_ids",
+        "attention_mask",
+        "labels",
+        "loss_weights",
+        "position_ids",
+        "token_type_ids",
+    }
+)
+
+MM_TENSOR_KEYS = frozenset(
+    {
+        "pixel_values",
+        "image_grid_thw",
+        "pixel_values_videos",
+        "video_grid_thw",
+        "second_per_grid_ts",
+        "video_second_per_grid",
+        "input_features",
+        "feature_attention_mask",
+    }
+)
+
 
 def is_tokenizer(processor: Processor) -> bool:
     """Check if processor is tokenizer.
@@ -61,12 +85,8 @@ def pad_and_truncate(samples: list[ModelInput], max_seqlen: int) -> list[BatchIn
     for sample in samples:
         padded_sample = {}
         for key, value in sample.items():
-            if "label" in key:
-                pad_value = IGNORE_INDEX
-            else:
-                pad_value = 0
-
-            if not isinstance(value, str):
+            if key in SEQUENCE_KEYS:
+                pad_value = IGNORE_INDEX if key == "labels" else 0
                 padded_sample[key] = _pad_and_truncate(torch.tensor(value), max_length, pad_value)
             else:
                 padded_sample[key] = value

@@ -91,10 +91,19 @@ class ModelEngine:
         https://github.com/huggingface/transformers/blob/v5.0.0rc0/src/transformers/modeling_utils.py#L3538
         """
         if self.args.model_class == ModelClass.LLM:
-            from transformers import AutoModelForCausalLM, AutoModelForImageTextToText
+            from transformers import (
+                AutoModelForCausalLM,
+                AutoModelForImageTextToText,
+                AutoModelForSeq2SeqLM,
+                AutoModelForTextToWaveform,
+            )
 
             if type(self.model_config) in AutoModelForImageTextToText._model_mapping.keys():
                 AutoClass = AutoModelForImageTextToText
+            elif type(self.model_config) in AutoModelForSeq2SeqLM._model_mapping.keys():
+                AutoClass = AutoModelForSeq2SeqLM
+            elif type(self.model_config) in AutoModelForTextToWaveform._model_mapping.keys():
+                AutoClass = AutoModelForTextToWaveform
             else:
                 AutoClass = AutoModelForCausalLM
 
@@ -125,6 +134,11 @@ class ModelEngine:
                 device_map=init_device,
                 trust_remote_code=self.args.trust_remote_code,
             )
+
+        if getattr(model.config, "model_type", None) in ["qwen2_5_omni", "qwen3_omni_moe"] and hasattr(
+            model, "thinker"
+        ):
+            model = model.thinker
 
         if self.args.peft_config is None:
             if self.is_train:
