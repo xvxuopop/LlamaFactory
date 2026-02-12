@@ -91,7 +91,7 @@ class Renderer:
         self.processor = processor
 
     def render_messages(
-        self, messages: list[Message], tools: str | None = None, is_generate: bool = False
+        self, messages: list[Message], tools: str | None = None, is_generate: bool = False, enable_thinking: bool = False,
     ) -> ModelInput:
         """Apply template to messages and convert them to model input.
 
@@ -108,7 +108,7 @@ class Renderer:
         else:
             from ...plugins.model_plugins.rendering import RenderingPlugin
 
-            return RenderingPlugin(self.template).render_messages(self.processor, messages, tools, is_generate)
+            return RenderingPlugin(self.template).render_messages(self.processor, messages, tools, is_generate, enable_thinking)
 
     def parse_message(self, generated_text: str) -> Message:
         """Parse a message in the template format.
