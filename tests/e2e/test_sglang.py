@@ -18,9 +18,10 @@ import pytest
 
 from llamafactory.chat import ChatModel
 from llamafactory.extras.packages import is_sglang_available
+from llamafactory.extras.testing_model_paths import get_model_path
 
 
-MODEL_NAME = "Qwen/Qwen2.5-0.5B"
+MODEL_NAME = get_model_path("QWEN2_5_0_5B", "Qwen2.5-0.5B")
 
 
 INFER_ARGS = {

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -22,16 +22,21 @@ from llamafactory.data import get_template_and_fix_tokenizer
 from llamafactory.data.template import parse_template
 from llamafactory.extras.packages import is_transformers_version_greater_than
 from llamafactory.hparams import DataArguments
+from llamafactory.extras.testing_model_paths import get_model_path
 
 
 if TYPE_CHECKING:
     from transformers import PreTrainedTokenizer
 
 
-HF_TOKEN = os.getenv("HF_TOKEN")
-
-TINY_LLAMA3 = os.getenv("TINY_LLAMA3", "llamafactory/tiny-random-Llama-3")
-TINY_LLAMA4 = os.getenv("TINY_LLAMA4", "llamafactory/tiny-random-Llama-4")
+TINY_LLAMA3 = get_model_path("TINY_LLAMA3", "tiny-random-Llama-3")
+TINY_LLAMA4 = get_model_path("TINY_LLAMA4", "tiny-random-Llama-4")
+LOCAL_GEMMA3 = get_model_path("LOCAL_GEMMA3", "gemma-3-4b-it")
+LOCAL_GEMMA2 = get_model_path("LOCAL_GEMMA2", "gemma-2-2b-it")
+LOCAL_LLAMA3 = get_model_path("LOCAL_LLAMA3", "Meta-Llama-3-8B-Instruct")
+PHI4 = get_model_path("PHI4", "phi-4")
+QWEN2_5_7B_INSTRUCT = get_model_path("QWEN2_5_7B_INSTRUCT", "Qwen2.5-7B-Instruct")
+QWEN3_8B = get_model_path("QWEN3_8B", "Qwen3-8B")
 
 MESSAGES = [
     {"role": "user", "content": "How are you"},
@@ -131,7 +136,7 @@ def test_encode_multiturn():
 @pytest.mark.parametrize("cot_messages", [True, False])
 @pytest.mark.parametrize("enable_thinking", [True, False, None])
 def test_reasoning_encode_oneturn(cot_messages: bool, enable_thinking: bool):
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B")
+    tokenizer = AutoTokenizer.from_pretrained(QWEN3_8B)
     data_args = DataArguments(template="qwen3", enable_thinking=enable_thinking)
     template = get_template_and_fix_tokenizer(tokenizer, data_args)
     prompt_ids, answer_ids = template.encode_oneturn(tokenizer, MESSAGES_WITH_THOUGHT if cot_messages else MESSAGES)
@@ -157,7 +162,7 @@ def test_reasoning_encode_oneturn(cot_messages: bool, enable_thinking: bool):
 @pytest.mark.parametrize("cot_messages", [True, False])
 @pytest.mark.parametrize("enable_thinking", [True, False, None])
 def test_reasoning_encode_multiturn(cot_messages: bool, enable_thinking: bool):
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B")
+    tokenizer = AutoTokenizer.from_pretrained(QWEN3_8B)
     data_args = DataArguments(template="qwen3", enable_thinking=enable_thinking)
     template = get_template_and_fix_tokenizer(tokenizer, data_args)
     encoded_pairs = template.encode_multiturn(tokenizer, MESSAGES_WITH_THOUGHT if cot_messages else MESSAGES)
@@ -186,7 +191,7 @@ def test_reasoning_encode_multiturn(cot_messages: bool, enable_thinking: bool):
 @pytest.mark.parametrize("enable_thinking", [True, False, None])
 @pytest.mark.parametrize("discarding_history_cot", [True, False])
 def test_reasoning_encode_multiturn_discarding_history_cot(enable_thinking: bool, discarding_history_cot: bool):
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B")
+    tokenizer = AutoTokenizer.from_pretrained(QWEN3_8B)
     data_args = DataArguments(template="qwen3", enable_thinking=enable_thinking)
     template = get_template_and_fix_tokenizer(tokenizer, data_args)
     encoded_pairs = template.encode_multiturn(
@@ -254,7 +259,7 @@ def test_get_stop_token_ids():
 
 
 @pytest.mark.runs_on(["cpu", "mps"])
-@pytest.mark.skipif(not HF_TOKEN, reason="Gated model.")
+@pytest.mark.skipif(not Path(LOCAL_GEMMA3).exists(), reason="Local gated model not found.")
 def test_gemma_template():
     prompt_str = (
         f"<bos><start_of_turn>user\n{MESSAGES[0]['content']}<end_of_turn>\n"
@@ -263,11 +268,11 @@ def test_gemma_template():
         "<start_of_turn>model\n"
     )
     answer_str = f"{MESSAGES[3]['content']}<end_of_turn>\n"
-    _check_template("google/gemma-3-4b-it", "gemma", prompt_str, answer_str)
+    _check_template(LOCAL_GEMMA3, "gemma", prompt_str, answer_str)
 
 
 @pytest.mark.runs_on(["cpu", "mps"])
-@pytest.mark.skipif(not HF_TOKEN, reason="Gated model.")
+@pytest.mark.skipif(not Path(LOCAL_GEMMA2).exists(), reason="Local gated model not found.")
 def test_gemma2_template():
     prompt_str = (
         f"<bos><start_of_turn>user\n{MESSAGES[0]['content']}<end_of_turn>\n"
@@ -276,11 +281,11 @@ def test_gemma2_template():
         "<start_of_turn>model\n"
     )
     answer_str = f"{MESSAGES[3]['content']}<end_of_turn>\n"
-    _check_template("google/gemma-2-2b-it", "gemma2", prompt_str, answer_str)
+    _check_template(LOCAL_GEMMA2, "gemma2", prompt_str, answer_str)
 
 
 @pytest.mark.runs_on(["cpu", "mps"])
-@pytest.mark.skipif(not HF_TOKEN, reason="Gated model.")
+@pytest.mark.skipif(not Path(LOCAL_LLAMA3).exists(), reason="Local gated model not found.")
 def test_llama3_template():
     prompt_str = (
         f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{MESSAGES[0]['content']}<|eot_id|>"
@@ -289,7 +294,7 @@ def test_llama3_template():
         "<|start_header_id|>assistant<|end_header_id|>\n\n"
     )
     answer_str = f"{MESSAGES[3]['content']}<|eot_id|>"
-    _check_template("meta-llama/Meta-Llama-3-8B-Instruct", "llama3", prompt_str, answer_str)
+    _check_template(LOCAL_LLAMA3, "llama3", prompt_str, answer_str)
 
 
 @pytest.mark.runs_on(["cpu", "mps"])
@@ -313,11 +318,11 @@ def test_phi4_template():
         "<|im_start|>assistant<|im_sep|>"
     )
     answer_str = f"{MESSAGES[3]['content']}<|im_end|>"
-    _check_template("microsoft/phi-4", "phi4", prompt_str, answer_str)
+    _check_template(PHI4, "phi4", prompt_str, answer_str)
 
 
 @pytest.mark.runs_on(["cpu", "mps"])
-@pytest.mark.xfail(not HF_TOKEN, reason="Authorization.")
+@pytest.mark.skipif(not Path(QWEN2_5_7B_INSTRUCT).exists(), reason="Local model not found.")
 def test_qwen2_5_template():
     prompt_str = (
         "<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n"
@@ -327,7 +332,7 @@ def test_qwen2_5_template():
         "<|im_start|>assistant\n"
     )
     answer_str = f"{MESSAGES[3]['content']}<|im_end|>\n"
-    _check_template("Qwen/Qwen2.5-7B-Instruct", "qwen", prompt_str, answer_str)
+    _check_template(QWEN2_5_7B_INSTRUCT, "qwen", prompt_str, answer_str)
 
 
 @pytest.mark.runs_on(["cpu", "mps"])
@@ -346,7 +351,7 @@ def test_qwen3_template(cot_messages: bool):
         answer_str = f"{MESSAGES_WITH_THOUGHT[3]['content']}<|im_end|>\n"
         messages = MESSAGES_WITH_THOUGHT
 
-    _check_template("Qwen/Qwen3-8B", "qwen3", prompt_str, answer_str, messages=messages)
+    _check_template(QWEN3_8B, "qwen3", prompt_str, answer_str, messages=messages)
 
 
 @pytest.mark.runs_on(["cpu", "mps"])
@@ -364,9 +369,9 @@ def test_parse_llama3_template():
 
 
 @pytest.mark.runs_on(["cpu", "mps"])
-@pytest.mark.xfail(not HF_TOKEN, reason="Authorization.")
+@pytest.mark.skipif(not Path(QWEN2_5_7B_INSTRUCT).exists(), reason="Local model not found.")
 def test_parse_qwen_template():
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B-Instruct")
+    tokenizer = AutoTokenizer.from_pretrained(QWEN2_5_7B_INSTRUCT)
     template = parse_template(tokenizer)
     assert template.__class__.__name__ == "Template"
     assert template.format_user.slots == ["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
@@ -377,9 +382,9 @@ def test_parse_qwen_template():
 
 
 @pytest.mark.runs_on(["cpu", "mps"])
-@pytest.mark.xfail(not HF_TOKEN, reason="Authorization.")
+@pytest.mark.skipif(not Path(QWEN3_8B).exists(), reason="Local model not found.")
 def test_parse_qwen3_template():
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B")
+    tokenizer = AutoTokenizer.from_pretrained(QWEN3_8B)
     template = parse_template(tokenizer)
     assert template.__class__.__name__ == "ReasoningTemplate"
     assert template.format_user.slots == ["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]

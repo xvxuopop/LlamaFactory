@@ -12,15 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-
 import pytest
 
 from llamafactory.hparams import ModelArguments
 from llamafactory.model import load_tokenizer
+from llamafactory.extras.testing_model_paths import get_model_path
 
 
-TINY_LLAMA3 = os.getenv("TINY_LLAMA3", "llamafactory/tiny-random-Llama-3")
+TINY_LLAMA3 = get_model_path("TINY_LLAMA3", "tiny-random-Llama-3")
 
 UNUSED_TOKEN = "<|UNUSED_TOKEN|>"
 

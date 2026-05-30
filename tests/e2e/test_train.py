@@ -17,13 +17,14 @@ import os
 import pytest
 
 from llamafactory.train.tuner import export_model, run_exp
+from llamafactory.extras.testing_model_paths import get_model_path
 
 
 DEMO_DATA = os.getenv("DEMO_DATA", "llamafactory/demo_data")
 
-TINY_LLAMA3 = os.getenv("TINY_LLAMA3", "llamafactory/tiny-random-Llama-3")
+TINY_LLAMA3 = get_model_path("TINY_LLAMA3", "tiny-random-Llama-3")
 
-TINY_LLAMA_ADAPTER = os.getenv("TINY_LLAMA_ADAPTER", "llamafactory/tiny-random-Llama-3-lora")
+TINY_LLAMA_ADAPTER = get_model_path("TINY_LLAMA_ADAPTER", "tiny-random-Llama-3-lora")
 
 TRAIN_ARGS = {
     "model_name_or_path": TINY_LLAMA3,

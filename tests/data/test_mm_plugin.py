@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -24,6 +25,7 @@ from llamafactory.data.mm_plugin import get_mm_plugin
 from llamafactory.extras.packages import is_pyav_available, is_transformers_version_greater_than
 from llamafactory.hparams import get_infer_args
 from llamafactory.model import load_tokenizer
+from llamafactory.extras.testing_model_paths import get_model_path
 
 
 if TYPE_CHECKING:
@@ -34,10 +36,20 @@ if TYPE_CHECKING:
     from llamafactory.model.loader import TokenizerModule
 
 
-HF_TOKEN = os.getenv("HF_TOKEN")
-
-TINY_LLAMA3 = os.getenv("TINY_LLAMA3", "llamafactory/tiny-random-Llama-3")
-TINY_LLAMA4 = os.getenv("TINY_LLAMA4", "llamafactory/tiny-random-Llama-4")
+TINY_LLAMA3 = get_model_path("TINY_LLAMA3", "tiny-random-Llama-3")
+TINY_LLAMA4 = get_model_path("TINY_LLAMA4", "tiny-random-Llama-4")
+LOCAL_GEMMA3 = get_model_path("LOCAL_GEMMA3", "gemma-3-4b-it")
+LOCAL_PALIGEMMA = get_model_path("LOCAL_PALIGEMMA", "paligemma-3b-pt-224")
+GEMMA4 = get_model_path("GEMMA4", "gemma-4-31B-it")
+INTERNVL3 = get_model_path("INTERNVL3", "InternVL3-1B-hf")
+LLAVA = get_model_path("LLAVA", "llava-1.5-7b-hf")
+LLAVA_NEXT = get_model_path("LLAVA_NEXT", "llava-v1.6-vicuna-7b-hf")
+LLAVA_NEXT_VIDEO = get_model_path("LLAVA_NEXT_VIDEO", "LLaVA-NeXT-Video-7B-hf")
+PIXTRAL = get_model_path("PIXTRAL", "pixtral-12b")
+QWEN2_5_OMNI = get_model_path("QWEN2_5_OMNI", "Qwen2.5-Omni-7B")
+QWEN2_VL_7B = get_model_path("QWEN2_VL_7B", "Qwen2-VL-7B-Instruct")
+QWEN3_VL = get_model_path("QWEN3_VL", "Qwen3-VL-30B-A3B-Instruct")
+VIDEO_LLAVA = get_model_path("VIDEO_LLAVA", "Video-LLaVA-7B-hf")
 
 MM_MESSAGES = [
     {"role": "user", "content": "<image>What is in this image?"},
@@ -188,11 +200,11 @@ def test_base_plugin():
 
 
 @pytest.mark.runs_on(["cpu", "mps"])
-@pytest.mark.skipif(not HF_TOKEN, reason="Gated model.")
+@pytest.mark.skipif(not Path(LOCAL_GEMMA3).exists(), reason="Local gated model not found.")
 @pytest.mark.skipif(not is_transformers_version_greater_than("4.50.0"), reason="Requires transformers>=4.50.0")
 def test_gemma3_plugin():
     image_seqlen = 256
-    tokenizer_module = _load_tokenizer_module(model_name_or_path="google/gemma-3-4b-it")
+    tokenizer_module = _load_tokenizer_module(model_name_or_path=LOCAL_GEMMA3)
     gemma3_plugin = get_mm_plugin(name="gemma3", image_token="<image_soft_token>")
     image_tokens_expanded = "<image_soft_token>" * image_seqlen
     check_inputs = {"plugin": gemma3_plugin, **tokenizer_module}
@@ -213,7 +225,7 @@ def test_gemma3_plugin():
 @pytest.mark.runs_on(["cpu", "mps"])
 @pytest.mark.skipif(not is_transformers_version_greater_than("5.6.0"), reason="Requires transformers>=5.6.0")
 def test_gemma4_plugin():
-    tokenizer_module = _load_tokenizer_module(model_name_or_path="google/gemma-4-31B-it")
+    tokenizer_module = _load_tokenizer_module(model_name_or_path=GEMMA4)
     processor = tokenizer_module["processor"]
     gemma4_plugin = get_mm_plugin(name="gemma4", image_token="<|image|>", video_token="<|video|>")
     check_inputs = {"plugin": gemma4_plugin, **tokenizer_module}
@@ -247,7 +259,7 @@ def test_gemma4_plugin():
 @pytest.mark.skipif(not is_transformers_version_greater_than("4.52.0"), reason="Requires transformers>=4.52.0")
 def test_internvl_plugin():
     image_seqlen = 256
-    tokenizer_module = _load_tokenizer_module(model_name_or_path="OpenGVLab/InternVL3-1B-hf")
+    tokenizer_module = _load_tokenizer_module(model_name_or_path=INTERNVL3)
     internvl_plugin = get_mm_plugin("intern_vl", image_token="<image>", video_token="<video>")
     check_inputs = {"plugin": internvl_plugin, **tokenizer_module}
     check_inputs["expected_mm_messages"] = [
@@ -287,7 +299,7 @@ def test_llama4_plugin():
 @pytest.mark.runs_on(["cpu", "mps"])
 def test_llava_plugin():
     image_seqlen = 576
-    tokenizer_module = _load_tokenizer_module(model_name_or_path="llava-hf/llava-1.5-7b-hf")
+    tokenizer_module = _load_tokenizer_module(model_name_or_path=LLAVA)
     llava_plugin = get_mm_plugin(name="llava", image_token="<image>")
     check_inputs = {"plugin": llava_plugin, **tokenizer_module}
     check_inputs["expected_mm_messages"] = [
@@ -301,7 +313,7 @@ def test_llava_plugin():
 @pytest.mark.runs_on(["cpu", "mps"])
 def test_llava_next_plugin():
     image_seqlen = 1176
-    tokenizer_module = _load_tokenizer_module(model_name_or_path="llava-hf/llava-v1.6-vicuna-7b-hf")
+    tokenizer_module = _load_tokenizer_module(model_name_or_path=LLAVA_NEXT)
     llava_next_plugin = get_mm_plugin(name="llava_next", image_token="<image>")
     check_inputs = {"plugin": llava_next_plugin, **tokenizer_module}
     check_inputs["expected_mm_messages"] = [
@@ -315,7 +327,7 @@ def test_llava_next_plugin():
 @pytest.mark.runs_on(["cpu", "mps"])
 def test_llava_next_video_plugin():
     image_seqlen = 1176
-    tokenizer_module = _load_tokenizer_module(model_name_or_path="llava-hf/LLaVA-NeXT-Video-7B-hf")
+    tokenizer_module = _load_tokenizer_module(model_name_or_path=LLAVA_NEXT_VIDEO)
     llava_next_video_plugin = get_mm_plugin(name="llava_next_video", image_token="<image>", video_token="<video>")
     check_inputs = {"plugin": llava_next_video_plugin, **tokenizer_module}
     check_inputs["expected_mm_messages"] = [
@@ -327,10 +339,10 @@ def test_llava_next_video_plugin():
 
 
 @pytest.mark.runs_on(["cpu", "mps"])
-@pytest.mark.skipif(not HF_TOKEN, reason="Gated model.")
+@pytest.mark.skipif(not Path(LOCAL_PALIGEMMA).exists(), reason="Local gated model not found.")
 def test_paligemma_plugin():
     image_seqlen = 256
-    tokenizer_module = _load_tokenizer_module(model_name_or_path="google/paligemma-3b-pt-224")
+    tokenizer_module = _load_tokenizer_module(model_name_or_path=LOCAL_PALIGEMMA)
     paligemma_plugin = get_mm_plugin(name="paligemma", image_token="<image>")
     check_inputs = {"plugin": paligemma_plugin, **tokenizer_module}
     check_inputs["expected_mm_messages"] = [
@@ -350,7 +362,7 @@ def test_paligemma_plugin():
 @pytest.mark.skipif(not is_transformers_version_greater_than("4.50.0"), reason="Requires transformers>=4.50.0")
 def test_pixtral_plugin():
     image_slice_height, image_slice_width = 2, 2
-    tokenizer_module = _load_tokenizer_module(model_name_or_path="mistral-community/pixtral-12b")
+    tokenizer_module = _load_tokenizer_module(model_name_or_path=PIXTRAL)
     pixtral_plugin = get_mm_plugin(name="pixtral", image_token="[IMG]")
     check_inputs = {"plugin": pixtral_plugin, **tokenizer_module}
     check_inputs["expected_mm_messages"] = [
@@ -373,7 +385,7 @@ def test_pixtral_plugin():
 @pytest.mark.skipif(not is_transformers_version_greater_than("4.52.0"), reason="Requires transformers>=4.52.0")
 def test_qwen2_omni_plugin():
     image_seqlen, audio_seqlen = 4, 2
-    tokenizer_module = _load_tokenizer_module(model_name_or_path="Qwen/Qwen2.5-Omni-7B")
+    tokenizer_module = _load_tokenizer_module(model_name_or_path=QWEN2_5_OMNI)
     qwen2_omni_plugin = get_mm_plugin(
         name="qwen2_omni",
         image_token="<|IMAGE|>",
@@ -403,7 +415,7 @@ def test_qwen2_omni_plugin():
 @pytest.mark.runs_on(["cpu", "mps"])
 def test_qwen2_vl_plugin():
     image_seqlen = 4
-    tokenizer_module = _load_tokenizer_module(model_name_or_path="Qwen/Qwen2-VL-7B-Instruct")
+    tokenizer_module = _load_tokenizer_module(model_name_or_path=QWEN2_VL_7B)
     qwen2_vl_plugin = get_mm_plugin(name="qwen2_vl", image_token="<|image_pad|>")
     check_inputs = {"plugin": qwen2_vl_plugin, **tokenizer_module}
     check_inputs["expected_mm_messages"] = [
@@ -421,7 +433,7 @@ def test_qwen2_vl_plugin():
 @pytest.mark.skipif(not is_transformers_version_greater_than("4.57.0"), reason="Requires transformers>=4.57.0")
 def test_qwen3_vl_plugin():
     frame_seqlen = 1
-    tokenizer_module = _load_tokenizer_module(model_name_or_path="Qwen/Qwen3-VL-30B-A3B-Instruct")
+    tokenizer_module = _load_tokenizer_module(model_name_or_path=QWEN3_VL)
     qwen3_vl_plugin = get_mm_plugin(name="qwen3_vl", video_token="<|video_pad|>")
     check_inputs = {"plugin": qwen3_vl_plugin, **tokenizer_module}
     check_inputs["expected_mm_messages"] = [
@@ -448,7 +460,7 @@ def test_qwen3_vl_plugin_video_path():
     if not os.path.exists(video_path):
         pytest.skip(f"Video file not found: {video_path}")
 
-    tokenizer_module = _load_tokenizer_module(model_name_or_path="Qwen/Qwen3-VL-30B-A3B-Instruct")
+    tokenizer_module = _load_tokenizer_module(model_name_or_path=QWEN3_VL)
     processor = tokenizer_module["processor"]
     qwen3_vl_plugin = get_mm_plugin(name="qwen3_vl", video_token="<|video_pad|>")
 
@@ -477,7 +489,7 @@ def test_qwen3_vl_plugin_video_path():
 @pytest.mark.skipif(not is_transformers_version_greater_than("4.47.0"), reason="Requires transformers>=4.47.0")
 def test_video_llava_plugin():
     image_seqlen = 256
-    tokenizer_module = _load_tokenizer_module(model_name_or_path="LanguageBind/Video-LLaVA-7B-hf")
+    tokenizer_module = _load_tokenizer_module(model_name_or_path=VIDEO_LLAVA)
     video_llava_plugin = get_mm_plugin(name="video_llava", image_token="<image>", video_token="<video>")
     check_inputs = {"plugin": video_llava_plugin, **tokenizer_module}
     check_inputs["expected_mm_messages"] = [

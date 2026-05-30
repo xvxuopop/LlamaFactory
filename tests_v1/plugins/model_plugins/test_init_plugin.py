@@ -16,12 +16,16 @@
 from llamafactory.v1.accelerator.interface import DistributedInterface
 from llamafactory.v1.config.arg_parser import get_args
 from llamafactory.v1.core.model_engine import ModelEngine
+from llamafactory.extras.testing_model_paths import get_model_path
+
+
+TINY_QWEN3 = get_model_path("TINY_QWEN3", "tiny-random-qwen3")
 
 
 def test_init_on_meta():
     model_args, *_ = get_args(
         dict(
-            model="llamafactory/tiny-random-qwen3",
+            model=TINY_QWEN3,
             init_config={"name": "init_on_meta"},
         )
     )
@@ -32,7 +36,7 @@ def test_init_on_meta():
 def test_init_on_rank0():
     model_args, *_ = get_args(
         dict(
-            model="llamafactory/tiny-random-qwen3",
+            model=TINY_QWEN3,
             init_config={"name": "init_on_rank0"},
         )
     )
@@ -46,7 +50,7 @@ def test_init_on_rank0():
 def test_init_on_default():
     model_args, *_ = get_args(
         dict(
-            model="llamafactory/tiny-random-qwen3",
+            model=TINY_QWEN3,
             init_config={"name": "init_on_default"},
         )
     )

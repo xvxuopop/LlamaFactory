@@ -22,13 +22,17 @@ from transformers import AutoConfig, AutoModelForImageTextToText
 from llamafactory.extras.packages import is_transformers_version_greater_than
 from llamafactory.hparams import FinetuningArguments, ModelArguments
 from llamafactory.model.adapter import init_adapter
+from llamafactory.extras.testing_model_paths import get_model_path
+
+
+QWEN2_VL_2B = get_model_path("QWEN2_VL_2B", "Qwen2-VL-2B-Instruct")
 
 
 @pytest.mark.parametrize("freeze_vision_tower", (False, True))
 @pytest.mark.parametrize("freeze_multi_modal_projector", (False, True))
 @pytest.mark.parametrize("freeze_language_model", (False, True))
 def test_visual_full(freeze_vision_tower: bool, freeze_multi_modal_projector: bool, freeze_language_model: bool):
-    model_args = ModelArguments(model_name_or_path="Qwen/Qwen2-VL-2B-Instruct")
+    model_args = ModelArguments(model_name_or_path=QWEN2_VL_2B)
     finetuning_args = FinetuningArguments(
         finetuning_type="full",
         freeze_vision_tower=freeze_vision_tower,
@@ -51,7 +55,7 @@ def test_visual_full(freeze_vision_tower: bool, freeze_multi_modal_projector: bo
 
 @pytest.mark.parametrize("freeze_vision_tower,freeze_language_model", ((False, False), (False, True), (True, False)))
 def test_visual_lora(freeze_vision_tower: bool, freeze_language_model: bool):
-    model_args = ModelArguments(model_name_or_path="Qwen/Qwen2-VL-2B-Instruct")
+    model_args = ModelArguments(model_name_or_path=QWEN2_VL_2B)
     finetuning_args = FinetuningArguments(
         finetuning_type="lora", freeze_vision_tower=freeze_vision_tower, freeze_language_model=freeze_language_model
     )
@@ -83,7 +87,7 @@ def test_visual_lora(freeze_vision_tower: bool, freeze_language_model: bool):
 
 def test_visual_model_save_load():
     # check VLM's state dict: https://github.com/huggingface/transformers/pull/38385
-    model_args = ModelArguments(model_name_or_path="Qwen/Qwen2-VL-2B-Instruct")
+    model_args = ModelArguments(model_name_or_path=QWEN2_VL_2B)
     finetuning_args = FinetuningArguments(finetuning_type="full")
     config = AutoConfig.from_pretrained(model_args.model_name_or_path)
     with torch.device("meta"):

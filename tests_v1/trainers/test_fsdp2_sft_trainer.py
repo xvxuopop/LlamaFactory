@@ -18,13 +18,18 @@ from pathlib import Path
 
 import pytest
 
+from llamafactory.extras.testing_model_paths import get_model_path
+
+
+QWEN3_0_6B = get_model_path("QWEN3_0_6B", "Qwen3-0.6B")
+
 
 @pytest.mark.xfail(reason="CI machines may OOM when heavily loaded.")
 @pytest.mark.runs_on(["cuda", "npu"])
 def test_fsdp2_sft_trainer(tmp_path: Path):
     """Test FSDP2 SFT trainer by simulating `llamafactory-cli sft config.yaml` behavior."""
     config_yaml = """\
-model: Qwen/Qwen3-0.6B
+model: {model_path}
 trust_remote_code: true
 model_class: llm
 
@@ -63,7 +68,7 @@ max_new_tokens: 128
     output_dir = tmp_path / "outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
     config_file = tmp_path / "config.yaml"
-    config_file.write_text(config_yaml.format(output_dir=str(output_dir)))
+    config_file.write_text(config_yaml.format(model_path=QWEN3_0_6B, output_dir=str(output_dir)))
 
     # Set up environment variables
     env = os.environ.copy()

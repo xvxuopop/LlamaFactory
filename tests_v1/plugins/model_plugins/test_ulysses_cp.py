@@ -25,13 +25,17 @@ from llamafactory.v1.plugins.model_plugins.parallelization.sequence_parallel imp
 )
 from llamafactory.v1.utils.env import find_available_port
 from llamafactory.v1.utils.pytest import dist_env
+from llamafactory.extras.testing_model_paths import get_model_path
+
+
+TINY_QWEN3 = get_model_path("TINY_QWEN3", "tiny-random-qwen3")
 
 
 def _test_sequence_parallel_loss(
     local_rank: int, world_size: int, master_port: int, cp_size: int, dp_size: int, batch_size: int
 ):
     with dist_env(local_rank, world_size, master_port):
-        model_args = ModelArguments(model="llamafactory/tiny-random-qwen3")
+        model_args = ModelArguments(model=TINY_QWEN3)
 
         # Initialize distributed interface with config
         dist_config = {"cp_mode": "ulysses", "cp_size": cp_size, "dp_size": dp_size}

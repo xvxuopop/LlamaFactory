@@ -18,6 +18,11 @@ from unittest.mock import MagicMock, patch
 import torch.multiprocessing as mp
 from transformers import AutoModelForCausalLM
 
+from llamafactory.extras.testing_model_paths import get_model_path
+
+
+TINY_QWEN3 = get_model_path("TINY_QWEN3", "tiny-random-qwen3")
+
 
 def _apply_kernel(rank) -> None:
     with patch("torch.accelerator.current_accelerator") as mock_get_accelerator:
@@ -32,7 +37,7 @@ def _apply_kernel(rank) -> None:
 
         from llamafactory.v1.plugins.model_plugins.kernels.interface import apply_default_kernels
 
-        model = AutoModelForCausalLM.from_pretrained("llamafactory/tiny-random-qwen3")
+        model = AutoModelForCausalLM.from_pretrained(TINY_QWEN3)
         original_rmsnorm_forward = model.model.layers[0].input_layernorm.forward
         original_swiglu_forward = model.model.layers[0].mlp.forward
 
@@ -55,7 +60,7 @@ def _apply_all_kernels(rank) -> None:
 
         from llamafactory.v1.plugins.model_plugins.kernels.interface import apply_default_kernels
 
-        model = AutoModelForCausalLM.from_pretrained("llamafactory/tiny-random-qwen3")
+        model = AutoModelForCausalLM.from_pretrained(TINY_QWEN3)
         original_rmsnorm_forward = model.model.layers[0].input_layernorm.forward
         original_swiglu_forward = model.model.layers[0].mlp.forward
 

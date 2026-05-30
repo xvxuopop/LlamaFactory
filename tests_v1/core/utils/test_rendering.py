@@ -21,6 +21,11 @@ from llamafactory.v1.config import DataArguments
 from llamafactory.v1.core.data_engine import DataEngine
 from llamafactory.v1.core.utils.rendering import Renderer
 from llamafactory.v1.utils.types import Processor
+from llamafactory.extras.testing_model_paths import get_model_path
+
+
+TINY_QWEN3 = get_model_path("TINY_QWEN3", "tiny-random-qwen3")
+QWEN3_4B_INSTRUCT_2507 = get_model_path("QWEN3_4B_INSTRUCT_2507", "Qwen3-4B-Instruct-2507")
 
 
 def _get_input_ids(inputs: list | dict) -> list:
@@ -85,7 +90,7 @@ V1_TOOLS = [
 
 
 def test_chatml_rendering():
-    tokenizer: Processor = AutoTokenizer.from_pretrained("llamafactory/tiny-random-qwen3")
+    tokenizer: Processor = AutoTokenizer.from_pretrained(TINY_QWEN3)
     renderer = Renderer(template="chatml", processor=tokenizer)
 
     hf_inputs = _get_input_ids(tokenizer.apply_chat_template(HF_MESSAGES[:-1], add_generation_prompt=True))
@@ -107,7 +112,7 @@ def test_chatml_rendering():
 
 
 def test_chatml_parse():
-    tokenizer: Processor = AutoTokenizer.from_pretrained("llamafactory/tiny-random-qwen3")
+    tokenizer: Processor = AutoTokenizer.from_pretrained(TINY_QWEN3)
     renderer = Renderer(template="chatml", processor=tokenizer)
     generated_text = "LLM stands for Large Language Model."
     parsed_message = renderer.parse_message(generated_text)
@@ -116,7 +121,7 @@ def test_chatml_parse():
 
 @pytest.mark.parametrize("num_samples", [16])
 def test_chatml_rendering_remote(num_samples: int):
-    tokenizer: Processor = AutoTokenizer.from_pretrained("llamafactory/tiny-random-qwen3")
+    tokenizer: Processor = AutoTokenizer.from_pretrained(TINY_QWEN3)
     renderer = Renderer(template="chatml", processor=tokenizer)
     data_args = DataArguments(train_dataset="llamafactory/v1-sft-demo")
     data_engine = DataEngine(data_args.train_dataset)
@@ -128,7 +133,7 @@ def test_chatml_rendering_remote(num_samples: int):
 
 
 def test_qwen3_nothink_rendering():
-    tokenizer: Processor = AutoTokenizer.from_pretrained("Qwen/Qwen3-4B-Instruct-2507")
+    tokenizer: Processor = AutoTokenizer.from_pretrained(QWEN3_4B_INSTRUCT_2507)
     renderer = Renderer(template="qwen3_nothink", processor=tokenizer)
 
     hf_inputs = _get_input_ids(
@@ -156,7 +161,7 @@ def test_qwen3_nothink_rendering():
 
 
 def test_qwen3_nothink_parse():
-    tokenizer: Processor = AutoTokenizer.from_pretrained("Qwen/Qwen3-4B-Instruct-2507")
+    tokenizer: Processor = AutoTokenizer.from_pretrained(QWEN3_4B_INSTRUCT_2507)
     renderer = Renderer(template="qwen3_nothink", processor=tokenizer)
     generated_text = (
         "<thinking>I need to use the multiply function to calculate 6*8.</thinking>"
@@ -176,7 +181,7 @@ def test_qwen3_nothink_parse():
 
 @pytest.mark.parametrize("num_samples", [8])
 def test_qwen3_nothink_rendering_remote(num_samples: int):
-    tokenizer: Processor = AutoTokenizer.from_pretrained("Qwen/Qwen3-4B-Instruct-2507")
+    tokenizer: Processor = AutoTokenizer.from_pretrained(QWEN3_4B_INSTRUCT_2507)
     renderer = Renderer(template="qwen3_nothink", processor=tokenizer)
     data_args = DataArguments(train_dataset="llamafactory/reason-tool-use-demo-1500")
     data_engine = DataEngine(data_args.train_dataset)
@@ -196,7 +201,7 @@ def test_qwen3_nothink_rendering_remote(num_samples: int):
 
 
 def test_process_sft_samples():
-    tokenizer: Processor = AutoTokenizer.from_pretrained("llamafactory/tiny-random-qwen3")
+    tokenizer: Processor = AutoTokenizer.from_pretrained(TINY_QWEN3)
     renderer = Renderer(template="chatml", processor=tokenizer)
     hf_inputs = _get_input_ids(tokenizer.apply_chat_template(HF_MESSAGES))
 
@@ -209,7 +214,7 @@ def test_process_sft_samples():
 
 
 def test_process_dpo_samples():
-    tokenizer: Processor = AutoTokenizer.from_pretrained("llamafactory/tiny-random-qwen3")
+    tokenizer: Processor = AutoTokenizer.from_pretrained(TINY_QWEN3)
     renderer = Renderer(template="chatml", processor=tokenizer)
     hf_inputs = _get_input_ids(tokenizer.apply_chat_template(HF_MESSAGES))
 

@@ -18,9 +18,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from llamafactory.v1.plugins.model_plugins import peft as peft_module
 from llamafactory.v1.plugins.model_plugins.peft import merge_and_export_model
+from llamafactory.extras.testing_model_paths import get_model_path
 
 
-TINY_MODEL = "llamafactory/tiny-random-qwen3"
+TINY_MODEL = get_model_path("TINY_QWEN3", "tiny-random-qwen3")
 
 
 @pytest.fixture(scope="module")

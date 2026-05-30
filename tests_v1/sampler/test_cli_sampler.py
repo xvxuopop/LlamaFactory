@@ -17,11 +17,15 @@ import pytest
 from llamafactory.v1.config import ModelArguments, SampleArguments
 from llamafactory.v1.core.model_engine import ModelEngine
 from llamafactory.v1.samplers.cli_sampler import SyncSampler
+from llamafactory.extras.testing_model_paths import get_model_path
+
+
+QWEN3_4B = get_model_path("QWEN3_4B", "Qwen3-4B")
 
 
 @pytest.mark.runs_on(["cuda", "npu"])
 def test_sync_sampler():
-    model_args = ModelArguments(model="Qwen/Qwen3-4B-Instruct-2507", template="qwen3_nothink")
+    model_args = ModelArguments(model=QWEN3_4B, template="qwen3_nothink")
     sample_args = SampleArguments()
     model_engine = ModelEngine(model_args)
     sampler = SyncSampler(sample_args, model_args, model_engine.model, model_engine.renderer)

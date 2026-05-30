@@ -31,6 +31,31 @@ from llamafactory.train.test_utils import patch_valuehead_model
 
 CURRENT_DEVICE = get_current_device().type
 
+MODEL_TEST_PATHS = {
+    "tests/data/processor/test_feedback.py",
+    "tests/data/processor/test_pairwise.py",
+    "tests/data/processor/test_supervised.py",
+    "tests/data/processor/test_unsupervised.py",
+    "tests/data/test_collator.py",
+    "tests/data/test_loader.py",
+    "tests/data/test_mm_plugin.py",
+    "tests/data/test_template.py",
+    "tests/e2e/test_chat.py",
+    "tests/e2e/test_sglang.py",
+    "tests/e2e/test_train.py",
+    "tests/model/model_utils/test_add_tokens.py",
+    "tests/model/model_utils/test_attention.py",
+    "tests/model/model_utils/test_checkpointing.py",
+    "tests/model/model_utils/test_misc.py",
+    "tests/model/model_utils/test_visual.py",
+    "tests/model/test_base.py",
+    "tests/model/test_freeze.py",
+    "tests/model/test_full.py",
+    "tests/model/test_lora.py",
+    "tests/model/test_pissa.py",
+    "tests/train/test_sft_trainer.py",
+}
+
 
 def pytest_configure(config: Config):
     """Register custom pytest markers."""
@@ -108,6 +133,13 @@ def _handle_device_visibility(items: list[Item]):
 
 def pytest_collection_modifyitems(config: Config, items: list[Item]):
     """Modify test collection based on markers and environment."""
+    if not is_env_enabled("RUN_MODEL_TESTS"):
+        skip_model_tests = pytest.mark.skip(reason="model-dependent test (set RUN_MODEL_TESTS=1 to run)")
+        for item in items:
+            rel_path = os.path.relpath(str(item.fspath), config.rootpath)
+            if rel_path in MODEL_TEST_PATHS:
+                item.add_marker(skip_model_tests)
+
     # Handle version compatibility (from HEAD)
     skip_bc = pytest.mark.skip(reason="Skip backward compatibility tests")
     for item in items:

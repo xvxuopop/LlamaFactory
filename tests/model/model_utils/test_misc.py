@@ -12,21 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
+from pathlib import Path
 
 import pytest
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM
 
 from llamafactory.model.model_utils.misc import find_expanded_modules
+from llamafactory.extras.testing_model_paths import get_model_path
 
 
-HF_TOKEN = os.getenv("HF_TOKEN")
+LOCAL_LLAMA3 = get_model_path("LOCAL_LLAMA3", "Meta-Llama-3-8B-Instruct")
 
 
-@pytest.mark.skipif(not HF_TOKEN, reason="Gated model.")
+@pytest.mark.skipif(not Path(LOCAL_LLAMA3).exists(), reason="Local gated model not found.")
 def test_expanded_modules():
-    config = AutoConfig.from_pretrained("meta-llama/Meta-Llama-3-8B-Instruct")
+    config = AutoConfig.from_pretrained(LOCAL_LLAMA3)
     with torch.device("meta"):
         model = AutoModelForCausalLM.from_config(config)
 

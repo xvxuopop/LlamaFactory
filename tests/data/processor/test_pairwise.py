@@ -22,11 +22,12 @@ from transformers import AutoTokenizer
 from llamafactory.extras.constants import IGNORE_INDEX
 from llamafactory.extras.packages import is_transformers_version_greater_than
 from llamafactory.train.test_utils import load_dataset_module
+from llamafactory.extras.testing_model_paths import get_model_path
 
 
 DEMO_DATA = os.getenv("DEMO_DATA", "llamafactory/demo_data")
 
-TINY_LLAMA3 = os.getenv("TINY_LLAMA3", "llamafactory/tiny-random-Llama-3")
+TINY_LLAMA3 = get_model_path("TINY_LLAMA3", "tiny-random-Llama-3")
 
 TRAIN_ARGS = {
     "model_name_or_path": TINY_LLAMA3,

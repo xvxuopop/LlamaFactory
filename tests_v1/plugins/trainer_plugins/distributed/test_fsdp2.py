@@ -25,9 +25,10 @@ from llamafactory.v1.accelerator.interface import DistributedInterface
 from llamafactory.v1.config.arg_parser import get_args
 from llamafactory.v1.core.model_engine import ModelEngine
 from llamafactory.v1.plugins.trainer_plugins.distributed.fsdp2 import FSDP2Engine
+from llamafactory.extras.testing_model_paths import get_model_path
 
 
-TINY_MODEL = "llamafactory/tiny-random-qwen3"
+TINY_MODEL = get_model_path("TINY_QWEN3", "tiny-random-qwen3")
 
 
 def collect_non_persistent_buffers(model):

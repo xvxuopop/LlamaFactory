@@ -16,9 +16,11 @@ import pytest
 
 from llamafactory.v1.config.model_args import ModelArguments
 from llamafactory.v1.core.model_engine import ModelEngine
+from llamafactory.extras.testing_model_paths import get_model_path
 
 
 bitsandbytes = pytest.importorskip("bitsandbytes")
+TINY_QWEN3 = get_model_path("TINY_QWEN3", "tiny-random-qwen3")
 
 
 def check_quantization_status(model):
@@ -38,7 +40,7 @@ def check_quantization_status(model):
 @pytest.mark.parametrize("name, quantization_bit", [("bnb", 4), ("auto", 4)])
 def test_quantization_plugin(name, quantization_bit):
     model_args = ModelArguments(
-        model="llamafactory/tiny-random-qwen3",
+        model=TINY_QWEN3,
         quant_config={
             "name": name,
             "quantization_bit": quantization_bit,

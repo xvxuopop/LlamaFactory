@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import inspect
-import os
 from collections import Counter
 
 import pytest
@@ -27,9 +26,11 @@ from llamafactory.extras.constants import IGNORE_INDEX
 from llamafactory.extras.packages import is_transformers_version_greater_than
 from llamafactory.hparams import get_infer_args
 from llamafactory.model import load_tokenizer
+from llamafactory.extras.testing_model_paths import get_model_path
 
 
-TINY_LLAMA3 = os.getenv("TINY_LLAMA3", "llamafactory/tiny-random-Llama-3")
+TINY_LLAMA3 = get_model_path("TINY_LLAMA3", "tiny-random-Llama-3")
+QWEN2_VL_2B = get_model_path("QWEN2_VL_2B", "Qwen2-VL-2B-Instruct")
 
 
 @pytest.mark.runs_on(["cpu", "mps"])
@@ -79,7 +80,7 @@ def test_base_collator():
 @pytest.mark.runs_on(["cpu", "mps"])
 def test_multimodal_collator():
     model_args, data_args, *_ = get_infer_args(
-        {"model_name_or_path": "Qwen/Qwen2-VL-2B-Instruct", "template": "qwen2_vl"}
+        {"model_name_or_path": QWEN2_VL_2B, "template": "qwen2_vl"}
     )
     tokenizer_module = load_tokenizer(model_args)
     template = get_template_and_fix_tokenizer(tokenizer_module["tokenizer"], data_args)
@@ -273,7 +274,7 @@ def _get_expected_position_ids(
 @pytest.mark.runs_on(["cpu", "mps"])
 def test_multimodal_collator_with_packing():
     model_args, data_args, *_ = get_infer_args(
-        {"model_name_or_path": "Qwen/Qwen2-VL-2B-Instruct", "template": "qwen2_vl"}
+        {"model_name_or_path": QWEN2_VL_2B, "template": "qwen2_vl"}
     )
     tokenizer_module = load_tokenizer(model_args)
     template = get_template_and_fix_tokenizer(tokenizer_module["tokenizer"], data_args)
