@@ -20,7 +20,7 @@ from llamafactory.v1.samplers.cli_sampler import SyncSampler
 from llamafactory.extras.testing_model_paths import get_model_path
 
 
-QWEN3_4B = get_model_path("QWEN3_4B", "Qwen3-4B")
+QWEN3_4B = get_model_path("QWEN3_4B", "Qwen3-4B-Instruct-2507")
 
 
 @pytest.mark.runs_on(["cuda", "npu"])
