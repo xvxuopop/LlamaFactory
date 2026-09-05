@@ -18,7 +18,6 @@ import torch.nn.functional as F
 
 from ....accelerator.interface import Dim, DistributedInterface
 from ....utils.constants import IGNORE_INDEX
-from ....utils.helper import model_uses_mrope
 from ....utils.plugin import BasePlugin
 from .batch import prepare_sequence_parallel_batch
 from .gdn_attention import apply_gdn_attention
@@ -46,23 +45,32 @@ def apply_sequence_parallel(model, cp_size: int):
 
 
 @SequenceParallelLossPlugin("sequence_parallel_loss").register()
-def sequence_parallel_loss(model, model_inputs):
-    """Compute SFT loss for the common text or fused multimodal CP path."""
+def sequence_parallel_loss(model, model_inputs, loss_fn=None, *, uses_mrope: bool = False):
+    """Prepare CP targets and aggregate weighted CE, optionally using a custom loss function.
+
+    ``loss_fn`` receives ``(model, model_inputs, labels, loss_weights)``. Labels
+    and weights are already shifted globally and sharded for the local CP rank.
+    It must return a differentiable FP32 scalar weighted loss sum, without
+    shifting targets again, normalizing, or performing CP collectives.
+    """
     device_mesh = DistributedInterface().get_device_mesh(Dim.CP)
 
     prepared = prepare_sequence_parallel_batch(
         model_inputs,
         device=DistributedInterface().current_device,
         device_mesh=device_mesh,
-        uses_mrope=model_uses_mrope(model.config),
+        uses_mrope=uses_mrope,
     )
     labels = prepared.local_shift_labels
     loss_weights = prepared.local_shift_loss_weights
-    logits = model(**prepared.model_inputs).logits.float()
-    token_loss = F.cross_entropy(
-        logits.reshape(-1, logits.size(-1)), labels.reshape(-1), reduction="none", ignore_index=IGNORE_INDEX
-    )
-    local_numerator = (token_loss * loss_weights.reshape(-1)).sum()
+    if loss_fn is None:
+        logits = model(**prepared.model_inputs).logits.float()
+        token_loss = F.cross_entropy(
+            logits.reshape(-1, logits.size(-1)), labels.reshape(-1), reduction="none", ignore_index=IGNORE_INDEX
+        )
+        local_numerator = (token_loss * loss_weights.reshape(-1)).sum()
+    else:
+        local_numerator = loss_fn(model, prepared.model_inputs, labels, loss_weights)
     cp_group = device_mesh["cp"].get_group()
 
     # Do not average local mean losses: CP shards can own different supervised-token weights.
