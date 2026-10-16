@@ -257,6 +257,8 @@ class FSDP2Engine:
                     lora_modules.append(module)
 
             for module in lora_modules:
+                if ignored_params and all(param in ignored_params for param in module.parameters()):
+                    continue
                 fully_shard(
                     module,
                     mesh=self.fsdp_mesh,

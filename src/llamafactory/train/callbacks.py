@@ -341,7 +341,7 @@ class LogCallback(TrainerCallback):
 
 
 class TorchProfilerCallback(TrainerCallback):
-    r"""A callback for collecting torch.profiler traces during training.
+    r"""A callback for collecting PyTorch or Ascend profiler traces during training.
 
     Activated by setting ``enable_torch_profiler: true`` in the YAML config.
 
@@ -355,8 +355,9 @@ class TorchProfilerCallback(TrainerCallback):
       profiler_profile_memory – profile memory usage (default: true)
       profiler_with_stack     – record stack traces (default: true)
 
-    Trace files (one per rank, Chrome / TensorBoard JSON format) are written to
-    ``<profiler_output_dir>/rank_<N>/``.
+    Results are written to ``<profiler_output_dir>/rank_<N>/``. NPU training uses
+    ``torch_npu.profiler`` to generate Ascend analysis results; other devices use
+    ``torch.profiler`` to export Chrome / TensorBoard JSON traces.
     """
 
     def __init__(self, training_args: "TrainingArguments") -> None:
@@ -385,31 +386,33 @@ class TorchProfilerCallback(TrainerCallback):
         trace_dir = os.path.join(output_dir, f"rank_{rank}")
         os.makedirs(trace_dir, exist_ok=True)
 
-        activities = [torch.profiler.ProfilerActivity.CPU]
-        try:
-            if is_torch_cuda_available():
-                activities.append(torch.profiler.ProfilerActivity.CUDA)
-            if is_torch_npu_available():
-                activities.append(torch.profiler.ProfilerActivity.NPU)
-        except Exception:
-            pass
+        if is_torch_npu_available():
+            from torch_npu import profiler as profiler_backend
 
-        self.profiler = torch.profiler.profile(
+            activities = [profiler_backend.ProfilerActivity.CPU, profiler_backend.ProfilerActivity.NPU]
+        else:
+            profiler_backend = torch.profiler
+            activities = [profiler_backend.ProfilerActivity.CPU]
+            if is_torch_cuda_available():
+                activities.append(profiler_backend.ProfilerActivity.CUDA)
+
+        self.profiler = profiler_backend.profile(
             activities=activities,
-            schedule=torch.profiler.schedule(
+            schedule=profiler_backend.schedule(
                 wait=pa.profiler_wait_steps,
                 warmup=pa.profiler_warmup_steps,
                 active=pa.profiler_active_steps,
                 repeat=pa.profiler_repeat,
             ),
-            on_trace_ready=torch.profiler.tensorboard_trace_handler(trace_dir),
+            on_trace_ready=profiler_backend.tensorboard_trace_handler(trace_dir),
             record_shapes=pa.profiler_record_shapes,
             profile_memory=pa.profiler_profile_memory,
             with_stack=pa.profiler_with_stack,
         )
         self.profiler.start()
         logger.info_rank0(
-            f"TorchProfiler started — schedule: wait={pa.profiler_wait_steps}, warmup={pa.profiler_warmup_steps}, "
+            f"TorchProfiler started ({profiler_backend.__name__}) — "
+            f"schedule: wait={pa.profiler_wait_steps}, warmup={pa.profiler_warmup_steps}, "
             f"active={pa.profiler_active_steps}, repeat={pa.profiler_repeat}. Traces → {output_dir}"
         )
 

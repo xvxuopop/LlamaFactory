@@ -201,7 +201,10 @@ class BaseTrainer:
         """Init optimizer."""
         if self.args.optim_config is None:
             _trainable_params = [p for p in self.model.parameters() if p.requires_grad]
-            self.optimizer = torch.optim.AdamW(_trainable_params, lr=self.args.learning_rate)
+            # Individual EP experts are local Tensors alongside FSDP DTensors.
+            # AdamW's foreach path cannot update both kinds in one tensor list.
+            foreach = False if getattr(self.model, "_fsdpturbo_ling_ep_state", None) is not None else None
+            self.optimizer = torch.optim.AdamW(_trainable_params, lr=self.args.learning_rate, foreach=foreach)
         else:
             from ..plugins.trainer_plugins.optimizers.optimizer import OptimizerPlugin
 

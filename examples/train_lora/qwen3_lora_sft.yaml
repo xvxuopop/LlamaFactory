@@ -1,5 +1,5 @@
 ### model
-model_name_or_path: Qwen/Qwen3-4B-Instruct-2507
+model_name_or_path: /path/to/model
 trust_remote_code: true
 
 ### method
@@ -10,8 +10,8 @@ lora_rank: 8
 lora_target: all
 
 ### dataset
-dataset: identity,alpaca_en_demo
-template: qwen3_nothink
+dataset: alpaca_en_demo
+template: glm4_moe
 cutoff_len: 2048
 max_samples: 1000
 preprocessing_num_workers: 16
@@ -19,18 +19,18 @@ dataloader_num_workers: 4
 
 ### output
 output_dir: saves/qwen3-4b/lora/sft
-logging_steps: 10
+logging_steps: 1
 save_steps: 500
 plot_loss: true
 overwrite_output_dir: true
-save_only_model: false
+save_only_model: true
 report_to: none  # choices: [none, wandb, tensorboard, swanlab, mlflow]
 
 ### train
 per_device_train_batch_size: 1
-gradient_accumulation_steps: 8
+gradient_accumulation_steps: 1
 learning_rate: 1.0e-4
-num_train_epochs: 3.0
+max_steps: 5
 lr_scheduler_type: cosine
 warmup_ratio: 0.1
 bf16: true

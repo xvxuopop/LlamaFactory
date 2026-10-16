@@ -1,0 +1,415 @@
+diff --git a/src/llamafactory/v1/core/base_trainer.py b/src/llamafactory/v1/core/base_trainer.py
+index e04e8a9b..726132e5 100644
+--- a/src/llamafactory/v1/core/base_trainer.py
++++ b/src/llamafactory/v1/core/base_trainer.py
+@@ -201,7 +201,10 @@ class BaseTrainer:
+         """Init optimizer."""
+         if self.args.optim_config is None:
+             _trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+-            self.optimizer = torch.optim.AdamW(_trainable_params, lr=self.args.learning_rate)
++            # Individual EP experts are local Tensors alongside FSDP DTensors.
++            # AdamW's foreach path cannot update both kinds in one tensor list.
++            foreach = False if getattr(self.model, "_fsdpturbo_ling_ep_state", None) is not None else None
++            self.optimizer = torch.optim.AdamW(_trainable_params, lr=self.args.learning_rate, foreach=foreach)
+         else:
+             from ..plugins.trainer_plugins.optimizers.optimizer import OptimizerPlugin
+ 
+diff --git a/src/llamafactory/v1/plugins/trainer_plugins/distributed/fsdp2.py b/src/llamafactory/v1/plugins/trainer_plugins/distributed/fsdp2.py
+index ee539ac0..0527eddd 100644
+--- a/src/llamafactory/v1/plugins/trainer_plugins/distributed/fsdp2.py
++++ b/src/llamafactory/v1/plugins/trainer_plugins/distributed/fsdp2.py
+@@ -257,6 +257,8 @@ class FSDP2Engine:
+                     lora_modules.append(module)
+ 
+             for module in lora_modules:
++                if ignored_params and all(param in ignored_params for param in module.parameters()):
++                    continue
+                 fully_shard(
+                     module,
+                     mesh=self.fsdp_mesh,
+diff --git a/src/llamafactory/v1/plugins/trainer_plugins/distributed/fsdpturbo.py b/src/llamafactory/v1/plugins/trainer_plugins/distributed/fsdpturbo.py
+index 7b2ce9ac..7742ce0b 100644
+--- a/src/llamafactory/v1/plugins/trainer_plugins/distributed/fsdpturbo.py
++++ b/src/llamafactory/v1/plugins/trainer_plugins/distributed/fsdpturbo.py
+@@ -12,6 +12,7 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ 
++import os
+ from collections.abc import Callable
+ 
+ import torch
+@@ -159,7 +160,9 @@ def clip_grad_norm_(model: HFModel, max_norm: float, **kwargs) -> float:
+             continue
+ 
+         mesh_names = set(getattr(getattr(grad, "device_mesh", None), "mesh_dim_names", ()) or ())
+-        is_ep_side = isinstance(grad, DTensor) and bool(mesh_names & {parallel_state.EP, parallel_state.EFSDP})
++        is_ep_side = getattr(param, "_fsdpturbo_ling_expert", False) or (
++            isinstance(grad, DTensor) and bool(mesh_names & {parallel_state.EP, parallel_state.EFSDP})
++        )
+         if is_ep_side:
+             ep_params.append(param)
+         else:
+@@ -266,6 +269,36 @@ def _prepare_qwen3_5_moe_for_ep(model: HFModel) -> HFModel:
+     return model
+ 
+ 
++@FSDPTurboEPModelSpec.register(
++    "bailing_hybrid",
++    ep_modules=["model.layers.{*}.mlp.experts"],
++)
++def _prepare_ling_for_ep(model: HFModel) -> HFModel:
++    return model
++
++
++def save_model(model, output_dir, processor):
++    if getattr(model, "_fsdpturbo_ling_ep_state", None) is not None:
++        from .ling_ep import save_ling_ep_model
++
++        return save_ling_ep_model(model, output_dir, processor)
++    from .fsdp2 import save_model as save_fsdp_model
++
++    return save_fsdp_model(model, output_dir, processor)
++
++
++def save_checkpoint(model, optimizer, ckpt_dir, **kwargs):
++    from .fsdp2 import save_checkpoint as save_fsdp_checkpoint
++
++    if getattr(model, "_fsdpturbo_ling_ep_state", None) is None:
++        return save_fsdp_checkpoint(model, optimizer, ckpt_dir, **kwargs)
++
++    save_hf = kwargs.get("save_ckpt_as_hf", False)
++    save_fsdp_checkpoint(model, optimizer, ckpt_dir, **{**kwargs, "save_ckpt_as_hf": False})
++    if save_hf:
++        save_model(model, os.path.join(ckpt_dir, "hf_model"), kwargs.get("processor"))
++
++
+ class FSDPTurboFSDP2Engine(FSDP2Engine):
+     """FSDPTurbo EP adapter that reuses LlamaFactory's init/load flow.
+ 
+@@ -301,9 +334,12 @@ class FSDPTurboFSDP2Engine(FSDP2Engine):
+ 
+     def shard_model(self, model: HFModel) -> HFModel:
+         """Set storage dtype before FSDP materialization without leaking backend config into ModelEngine."""
+-        param_dtype = torch.bfloat16 if self.mixed_precision == "bf16" else torch.float32
+-        model = model.to(param_dtype)
+-        logger.info_rank0(f"Using {param_dtype} for FSDPTurbo full tuning.")
++        if self.is_lora_module_wrap(model):
++            logger.info_rank0("Preserving PEFT parameter and buffer dtypes for FSDPTurbo LoRA tuning.")
++        else:
++            param_dtype = torch.bfloat16 if self.mixed_precision == "bf16" else torch.float32
++            model = model.to(param_dtype)
++            logger.info_rank0(f"Using {param_dtype} for FSDPTurbo full tuning.")
+         return super().shard_model(model)
+ 
+     def _copy_weights(self, param, loaded_tensor):
+@@ -407,7 +443,20 @@ class FSDPTurboFSDP2Engine(FSDP2Engine):
+                 logger.info(f"FSDPTurbo EP device mesh: {ep_mesh}")
+                 logger.info(f"FSDPTurbo EP gradient divide factor: {ep_plan.gradient_divide_factor}")
+ 
+-            ep_target_model = expert_parallelize_modules(ep_target_model, ep_mesh, ep_plan)
++            if ep_plan.dispatcher == "ling":
++                from .ling_ep import prepare_ling_ep
++
++                if _get_model_type(ep_target_model) != "bailing_hybrid" or not self.is_lora_module_wrap(model):
++                    raise ValueError("ep_dispatcher='ling' currently supports Ling LoRA models only.")
++                if self.parallel_state.cp_size != 1 or self.ep_fsdp_size != 1:
++                    raise ValueError("Ling EP currently requires cp_size=1 and ep_size equal to world_size.")
++                model._fsdpturbo_ling_ep_state = prepare_ling_ep(
++                    ep_target_model, ep_mesh, ep_plan.gradient_divide_factor
++                )
++            else:
++                if _get_model_type(ep_target_model) == "bailing_hybrid":
++                    raise ValueError("Ling's individual experts require dist_config.ep_dispatcher: ling.")
++                ep_target_model = expert_parallelize_modules(ep_target_model, ep_mesh, ep_plan)
+ 
+             if self.ep_fsdp_size > 1:
+                 if self.rank == 0:
+diff --git a/src/llamafactory/v1/plugins/trainer_plugins/distributed/interface.py b/src/llamafactory/v1/plugins/trainer_plugins/distributed/interface.py
+index 7bad8513..471bbc34 100644
+--- a/src/llamafactory/v1/plugins/trainer_plugins/distributed/interface.py
++++ b/src/llamafactory/v1/plugins/trainer_plugins/distributed/interface.py
+@@ -118,13 +118,13 @@ class FSDPTurboDistributed(BaseDistributed):
+ 
+     @staticmethod
+     def save_model(model, output_dir, processor) -> None:
+-        from .fsdp2 import save_model
++        from .fsdpturbo import save_model
+ 
+         save_model(model, output_dir, processor)
+ 
+     @staticmethod
+     def save_checkpoint(model, optimizer, ckpt_dir, **kwargs) -> None:
+-        from .fsdp2 import save_checkpoint
++        from .fsdpturbo import save_checkpoint
+ 
+         save_checkpoint(model, optimizer, ckpt_dir, **kwargs)
+ 
+diff --git a/tests_v1/plugins/trainer_plugins/distributed/test_fsdpturbo_ep.py b/tests_v1/plugins/trainer_plugins/distributed/test_fsdpturbo_ep.py
+index cd7b3315..f69f39f1 100644
+--- a/tests_v1/plugins/trainer_plugins/distributed/test_fsdpturbo_ep.py
++++ b/tests_v1/plugins/trainer_plugins/distributed/test_fsdpturbo_ep.py
+@@ -43,6 +43,13 @@ def test_qwen35_ep_model_spec():
+     assert spec.ep_fsdp_modules == ["model.language_model.layers.{*}.mlp"]
+ 
+ 
++def test_ling_ep_model_spec():
++    spec = FSDPTurboEPModelSpec.get(_Model("bailing_hybrid"))
++
++    assert spec is not None
++    assert spec.ep_modules == ["model.layers.{*}.mlp.experts"]
++
++
+ def test_fsdpturbo_uses_class_plugin_and_strict_backend_params():
+     plugin = DistributedPlugin("fsdpturbo")
+     params = plugin.parse_params({"name": "fsdpturbo", "ep_size": 4}, FSDPTurboParams)
+@@ -68,6 +75,72 @@ def test_fsdpturbo_sets_storage_dtype_inside_backend(monkeypatch):
+     assert engine.shard_model(model).weight.dtype == torch.bfloat16
+ 
+ 
++def test_fsdpturbo_preserves_lora_and_rope_precision(monkeypatch):
++    from peft.tuners.lora.layer import Linear
++
++    from llamafactory.v1.plugins.trainer_plugins.distributed.fsdp2 import FSDP2Engine
++
++    monkeypatch.setattr(FSDP2Engine, "shard_model", lambda self, model: model)
++    engine = object.__new__(FSDPTurboFSDP2Engine)
++    engine.mixed_precision = "bf16"
++    model = Linear(torch.nn.Linear(4, 4, dtype=torch.bfloat16), "default", r=2, lora_alpha=4)
++    # PEFT's loader keeps trainable adapters in fp32 even when the base uses bf16.
++    model.lora_A.to(torch.float32)
++    model.lora_B.to(torch.float32)
++    inv_freq = torch.tensor([1.0, 0.6140203475952148])
++    model.register_buffer("inv_freq", inv_freq.clone(), persistent=False)
++
++    engine.shard_model(model)
++
++    assert model.base_layer.weight.dtype == torch.bfloat16
++    assert model.lora_A["default"].weight.dtype == torch.float32
++    assert model.lora_B["default"].weight.dtype == torch.float32
++    assert torch.equal(model.inv_freq, inv_freq)
++
++
++def test_ling_ep_adamw_disables_foreach():
++    from llamafactory.v1.core.base_trainer import BaseTrainer
++
++    model = torch.nn.Linear(2, 2)
++    model._fsdpturbo_ling_ep_state = object()
++    trainer = SimpleNamespace(model=model, args=SimpleNamespace(optim_config=None, learning_rate=1e-4))
++
++    BaseTrainer._init_optimizer(trainer)
++
++    assert trainer.optimizer.defaults["foreach"] is False
++
++
++def test_ling_ep_unused_experts_keep_zero_gradients_without_empty_index_copy(monkeypatch):
++    from llamafactory.v1.plugins.trainer_plugins.distributed import ling_ep
++
++    class Gate(torch.nn.Module):
++        def forward(self, x):
++            tokens = x.shape[0] * x.shape[1]
++            return torch.zeros(tokens, 1, dtype=torch.long), torch.ones(tokens, 1), torch.zeros(tokens, 2)
++
++    block = torch.nn.Module()
++    block.experts = torch.nn.ModuleDict({str(i): torch.nn.Linear(4, 4, bias=False) for i in range(2)})
++    block.gate = Gate()
++    block.config = SimpleNamespace(num_shared_experts=None)
++    block._ling_local_experts, block._ling_ep_size, block._ling_ep_group = 2, 1, None
++    monkeypatch.setattr(ling_ep.dist, "all_to_all_single", lambda output, value, **kwargs: output.copy_(value))
++    monkeypatch.setattr(ling_ep, "all_to_all_single_autograd", lambda value, *args: value)
++    original_index_copy = torch.Tensor.index_copy
++
++    def checked_index_copy(self, dim, index, source):
++        assert index.numel(), "Empty index_copy is unsafe on Ascend."
++        return original_index_copy(self, dim, index, source)
++
++    monkeypatch.setattr(torch.Tensor, "index_copy", checked_index_copy)
++    x = torch.randn(1, 3, 4, requires_grad=True)
++    actual, _ = ling_ep.ling_experts_forward(block, x)
++
++    torch.testing.assert_close(actual, block.experts["0"](x))
++    actual.sum().backward()
++    assert block.experts["1"].weight.grad is not None
++    assert torch.count_nonzero(block.experts["1"].weight.grad) == 0
++
++
+ def test_fsdpturbo_sets_public_efsdp_gradient_divide_factor(monkeypatch):
+     expert_parallel_module = pytest.importorskip("fsdp_turbo.distributed.expert_parallel.expert_parallel")
+     expert_fully_shard_module = pytest.importorskip(
+diff --git a/src/llamafactory/v1/plugins/trainer_plugins/distributed/ling_ep.py b/src/llamafactory/v1/plugins/trainer_plugins/distributed/ling_ep.py
+new file mode 100644
+index 00000000..e0a7965e
+--- /dev/null
++++ b/src/llamafactory/v1/plugins/trainer_plugins/distributed/ling_ep.py
+@@ -0,0 +1,171 @@
++# Copyright 2026 the LlamaFactory team.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""Expert parallelism for Ling's individual, optionally PEFT-wrapped experts."""
++
++import os
++import types
++from dataclasses import dataclass
++
++import torch
++import torch.distributed as dist
++from torch.distributed._functional_collectives import all_to_all_single_autograd
++from torch.distributed.checkpoint.state_dict import StateDictOptions, get_model_state_dict
++
++from ....utils.logging import get_logger
++
++
++logger = get_logger(__name__)
++EP_PARAMETER_MARKER = "_fsdpturbo_ling_expert"
++
++
++@dataclass
++class LingEPState:
++    checkpoint_group: object
++    trainable_parameters: int
++    trainable_tensors: int
++
++
++def _divide_expert_gradient(gradient, divisor):
++    return gradient / divisor
++
++
++def prepare_ling_ep(model, ep_mesh, gradient_divisor):
++    """Partition complete experts while preserving global names and PEFT Parameters.
++
++    Only pure EP with already-loaded weights is supported here. Replicated parameters
++    are managed by the outer FSDP mesh; local expert gradients need its averaging factor.
++    """
++    group = ep_mesh.get_group()
++    rank = dist.get_rank(group)
++    size = dist.get_world_size(group)
++    if size != dist.get_world_size():
++        raise ValueError("Ling EP currently requires ep_size == world_size and cp_size == 1.")
++    if getattr(model, "_init_mode", "init_on_default") != "init_on_default":
++        raise ValueError("Ling EP currently requires the default initialization with weights loaded on every rank.")
++    trainable = [p for p in model.parameters() if p.requires_grad]
++    blocks = [m for m in model.modules() if type(m).__name__ == "BailingMoeV3SparseMoeBlock"]
++    if not blocks:
++        raise ValueError("No Ling sparse MoE blocks were found for expert parallelism.")
++    for block in blocks:
++        if not isinstance(block.experts, torch.nn.ModuleList):
++            raise ValueError("Ling EP expects the original ModuleList of individual experts.")
++        if len(block.experts) % size:
++            raise ValueError(f"Ling's {len(block.experts)} experts must be divisible by EP size {size}.")
++
++    for block in blocks:
++        local_count = len(block.experts) // size
++        first = rank * local_count
++        block.experts = torch.nn.ModuleDict({str(i): block.experts[i] for i in range(first, first + local_count)})
++        block._ling_ep_group = group
++        block._ling_ep_size = size
++        block._ling_local_experts = local_count
++        for param in block.experts.parameters():
++            setattr(param, EP_PARAMETER_MARKER, True)
++            if param.requires_grad:
++                param.register_hook(lambda grad, divisor=gradient_divisor: _divide_expert_gradient(grad, divisor))
++        block.forward = types.MethodType(ling_experts_forward, block)
++
++    # CPU object gathering avoids staging the complete adapter through accelerator memory.
++    state = LingEPState(
++        checkpoint_group=dist.new_group(backend="gloo"),
++        trainable_parameters=sum(p.numel() for p in trainable),
++        trainable_tensors=len(trainable),
++    )
++    logger.info_rank0(
++        f"Ling EP: partitioned {len(blocks)} MoE blocks across {size} ranks; "
++        f"{len(blocks[0].experts)} experts per block per rank."
++    )
++    return state
++
++
++def ling_experts_forward(self, hidden_states):
++    """Route tokens to complete experts and combine their PEFT-aware outputs."""
++    identity = hidden_states
++    batch, length, width = hidden_states.shape
++    indices, weights, router_logits = self.gate(hidden_states)
++    x = hidden_states.reshape(-1, width)
++    top_k = indices.shape[-1]
++    flat_indices = indices.reshape(-1)
++    destinations = flat_indices // self._ling_local_experts
++    order = destinations.argsort(stable=True)
++    send_counts = destinations.bincount(minlength=self._ling_ep_size).to(torch.int64)
++    recv_counts = torch.empty_like(send_counts)
++    group = self._ling_ep_group
++    dist.all_to_all_single(recv_counts, send_counts, group=group)
++    sends, receives = send_counts.tolist(), recv_counts.tolist()
++    dispatch_input = x.index_select(0, order // top_k).contiguous()
++    received = all_to_all_single_autograd(dispatch_input, receives, sends, group)
++    received_ids = torch.empty(sum(receives), dtype=flat_indices.dtype, device=x.device)
++    dist.all_to_all_single(
++        received_ids,
++        flat_indices.index_select(0, order).contiguous(),
++        output_split_sizes=receives,
++        input_split_sizes=sends,
++        group=group,
++    )
++    # Retain both collectives in the backward graph even when a rank receives no tokens.
++    output = received * 0
++    empty_expert_sum = received.new_zeros(())
++    for key, expert in self.experts.items():
++        positions = (received_ids == int(key)).nonzero().flatten()
++        expert_output = expert(received.index_select(0, positions))
++        if positions.numel():
++            output = output.index_copy(0, positions, expert_output)
++        else:
++            # Ascend index_copy with an empty index can leave its output uninitialized.
++            # Keep zero gradients for unused adapters, including AdamW weight decay.
++            empty_expert_sum = empty_expert_sum + expert_output.sum()
++    output = output + empty_expert_sum
++    returned = all_to_all_single_autograd(output.contiguous(), sends, receives, group)
++    unsorted = torch.zeros_like(returned).index_copy(0, order, returned)
++    y = (unsorted.reshape(-1, top_k, width) * weights.unsqueeze(-1)).sum(1)
++    y = y.to(hidden_states.dtype).reshape(batch, length, width)
++    if self.config.num_shared_experts is not None:
++        y = y + self.shared_experts(identity)
++    return y, (router_logits.reshape(batch, length, -1), indices.reshape(batch, length, -1))
++
++
++def save_ling_ep_model(model, output_dir, processor):
++    """Gather disjoint expert adapters as well as the ordinary FSDP parameters."""
++    state = model._fsdpturbo_ling_ep_state
++    rank = dist.get_rank()
++    local_experts = {
++        name: param.detach().cpu()
++        for name, param in model.named_parameters()
++        if param.requires_grad and getattr(param, EP_PARAMETER_MARKER, False)
++    }
++    options = StateDictOptions(full_state_dict=True, cpu_offload=True, ignore_frozen_params=True)
++    full_state = get_model_state_dict(model, options=options)
++    # ignore_frozen_params still retains persistent buffers such as expert_bias.
++    trainable_names = {name for name, param in model.named_parameters() if param.requires_grad}
++    full_state = {name: value for name, value in full_state.items() if name in trainable_names}
++    gathered = [None] * dist.get_world_size() if rank == 0 else None
++    dist.gather_object(local_experts, gathered, dst=0, group=state.checkpoint_group)
++    if rank == 0:
++        for expert_state in gathered:
++            full_state.update(expert_state)
++        parameters = sum(t.numel() for t in full_state.values())
++        if len(full_state) != state.trainable_tensors or parameters != state.trainable_parameters:
++            raise RuntimeError(
++                f"Incomplete Ling EP adapter: got {len(full_state)} tensors / {parameters} parameters, "
++                f"expected {state.trainable_tensors} / {state.trainable_parameters}."
++            )
++        os.makedirs(output_dir, exist_ok=True)
++        model.save_pretrained(output_dir, state_dict=full_state, max_shard_size="4GB")
++        if processor is not None:
++            processor.save_pretrained(output_dir)
++        logger.info(f"Saved complete Ling EP adapter ({len(full_state)} tensors) to {output_dir}.")
++    # Do not let peers destroy communicators while rank zero is still writing.
++    dist.barrier(group=state.checkpoint_group)

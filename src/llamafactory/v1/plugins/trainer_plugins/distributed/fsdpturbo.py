@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 from collections.abc import Callable
 
 import torch
@@ -159,7 +160,9 @@ def clip_grad_norm_(model: HFModel, max_norm: float, **kwargs) -> float:
             continue
 
         mesh_names = set(getattr(getattr(grad, "device_mesh", None), "mesh_dim_names", ()) or ())
-        is_ep_side = isinstance(grad, DTensor) and bool(mesh_names & {parallel_state.EP, parallel_state.EFSDP})
+        is_ep_side = getattr(param, "_fsdpturbo_ling_expert", False) or (
+            isinstance(grad, DTensor) and bool(mesh_names & {parallel_state.EP, parallel_state.EFSDP})
+        )
         if is_ep_side:
             ep_params.append(param)
         else:
@@ -266,6 +269,36 @@ def _prepare_qwen3_5_moe_for_ep(model: HFModel) -> HFModel:
     return model
 
 
+@FSDPTurboEPModelSpec.register(
+    "bailing_hybrid",
+    ep_modules=["model.layers.{*}.mlp.experts"],
+)
+def _prepare_ling_for_ep(model: HFModel) -> HFModel:
+    return model
+
+
+def save_model(model, output_dir, processor):
+    if getattr(model, "_fsdpturbo_ling_ep_state", None) is not None:
+        from .ling_ep import save_ling_ep_model
+
+        return save_ling_ep_model(model, output_dir, processor)
+    from .fsdp2 import save_model as save_fsdp_model
+
+    return save_fsdp_model(model, output_dir, processor)
+
+
+def save_checkpoint(model, optimizer, ckpt_dir, **kwargs):
+    from .fsdp2 import save_checkpoint as save_fsdp_checkpoint
+
+    if getattr(model, "_fsdpturbo_ling_ep_state", None) is None:
+        return save_fsdp_checkpoint(model, optimizer, ckpt_dir, **kwargs)
+
+    save_hf = kwargs.get("save_ckpt_as_hf", False)
+    save_fsdp_checkpoint(model, optimizer, ckpt_dir, **{**kwargs, "save_ckpt_as_hf": False})
+    if save_hf:
+        save_model(model, os.path.join(ckpt_dir, "hf_model"), kwargs.get("processor"))
+
+
 class FSDPTurboFSDP2Engine(FSDP2Engine):
     """FSDPTurbo EP adapter that reuses LlamaFactory's init/load flow.
 
@@ -301,9 +334,12 @@ class FSDPTurboFSDP2Engine(FSDP2Engine):
 
     def shard_model(self, model: HFModel) -> HFModel:
         """Set storage dtype before FSDP materialization without leaking backend config into ModelEngine."""
-        param_dtype = torch.bfloat16 if self.mixed_precision == "bf16" else torch.float32
-        model = model.to(param_dtype)
-        logger.info_rank0(f"Using {param_dtype} for FSDPTurbo full tuning.")
+        if self.is_lora_module_wrap(model):
+            logger.info_rank0("Preserving PEFT parameter and buffer dtypes for FSDPTurbo LoRA tuning.")
+        else:
+            param_dtype = torch.bfloat16 if self.mixed_precision == "bf16" else torch.float32
+            model = model.to(param_dtype)
+            logger.info_rank0(f"Using {param_dtype} for FSDPTurbo full tuning.")
         return super().shard_model(model)
 
     def _copy_weights(self, param, loaded_tensor):
@@ -407,7 +443,20 @@ class FSDPTurboFSDP2Engine(FSDP2Engine):
                 logger.info(f"FSDPTurbo EP device mesh: {ep_mesh}")
                 logger.info(f"FSDPTurbo EP gradient divide factor: {ep_plan.gradient_divide_factor}")
 
-            ep_target_model = expert_parallelize_modules(ep_target_model, ep_mesh, ep_plan)
+            if ep_plan.dispatcher == "ling":
+                from .ling_ep import prepare_ling_ep
+
+                if _get_model_type(ep_target_model) != "bailing_hybrid" or not self.is_lora_module_wrap(model):
+                    raise ValueError("ep_dispatcher='ling' currently supports Ling LoRA models only.")
+                if self.parallel_state.cp_size != 1 or self.ep_fsdp_size != 1:
+                    raise ValueError("Ling EP currently requires cp_size=1 and ep_size equal to world_size.")
+                model._fsdpturbo_ling_ep_state = prepare_ling_ep(
+                    ep_target_model, ep_mesh, ep_plan.gradient_divide_factor
+                )
+            else:
+                if _get_model_type(ep_target_model) == "bailing_hybrid":
+                    raise ValueError("Ling's individual experts require dist_config.ep_dispatcher: ling.")
+                ep_target_model = expert_parallelize_modules(ep_target_model, ep_mesh, ep_plan)
 
             if self.ep_fsdp_size > 1:
                 if self.rank == 0:

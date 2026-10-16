@@ -43,6 +43,13 @@ def test_qwen35_ep_model_spec():
     assert spec.ep_fsdp_modules == ["model.language_model.layers.{*}.mlp"]
 
 
+def test_ling_ep_model_spec():
+    spec = FSDPTurboEPModelSpec.get(_Model("bailing_hybrid"))
+
+    assert spec is not None
+    assert spec.ep_modules == ["model.layers.{*}.mlp.experts"]
+
+
 def test_fsdpturbo_uses_class_plugin_and_strict_backend_params():
     plugin = DistributedPlugin("fsdpturbo")
     params = plugin.parse_params({"name": "fsdpturbo", "ep_size": 4}, FSDPTurboParams)
@@ -66,6 +73,72 @@ def test_fsdpturbo_sets_storage_dtype_inside_backend(monkeypatch):
     model = torch.nn.Linear(2, 2, dtype=torch.float32)
 
     assert engine.shard_model(model).weight.dtype == torch.bfloat16
+
+
+def test_fsdpturbo_preserves_lora_and_rope_precision(monkeypatch):
+    from peft.tuners.lora.layer import Linear
+
+    from llamafactory.v1.plugins.trainer_plugins.distributed.fsdp2 import FSDP2Engine
+
+    monkeypatch.setattr(FSDP2Engine, "shard_model", lambda self, model: model)
+    engine = object.__new__(FSDPTurboFSDP2Engine)
+    engine.mixed_precision = "bf16"
+    model = Linear(torch.nn.Linear(4, 4, dtype=torch.bfloat16), "default", r=2, lora_alpha=4)
+    # PEFT's loader keeps trainable adapters in fp32 even when the base uses bf16.
+    model.lora_A.to(torch.float32)
+    model.lora_B.to(torch.float32)
+    inv_freq = torch.tensor([1.0, 0.6140203475952148])
+    model.register_buffer("inv_freq", inv_freq.clone(), persistent=False)
+
+    engine.shard_model(model)
+
+    assert model.base_layer.weight.dtype == torch.bfloat16
+    assert model.lora_A["default"].weight.dtype == torch.float32
+    assert model.lora_B["default"].weight.dtype == torch.float32
+    assert torch.equal(model.inv_freq, inv_freq)
+
+
+def test_ling_ep_adamw_disables_foreach():
+    from llamafactory.v1.core.base_trainer import BaseTrainer
+
+    model = torch.nn.Linear(2, 2)
+    model._fsdpturbo_ling_ep_state = object()
+    trainer = SimpleNamespace(model=model, args=SimpleNamespace(optim_config=None, learning_rate=1e-4))
+
+    BaseTrainer._init_optimizer(trainer)
+
+    assert trainer.optimizer.defaults["foreach"] is False
+
+
+def test_ling_ep_unused_experts_keep_zero_gradients_without_empty_index_copy(monkeypatch):
+    from llamafactory.v1.plugins.trainer_plugins.distributed import ling_ep
+
+    class Gate(torch.nn.Module):
+        def forward(self, x):
+            tokens = x.shape[0] * x.shape[1]
+            return torch.zeros(tokens, 1, dtype=torch.long), torch.ones(tokens, 1), torch.zeros(tokens, 2)
+
+    block = torch.nn.Module()
+    block.experts = torch.nn.ModuleDict({str(i): torch.nn.Linear(4, 4, bias=False) for i in range(2)})
+    block.gate = Gate()
+    block.config = SimpleNamespace(num_shared_experts=None)
+    block._ling_local_experts, block._ling_ep_size, block._ling_ep_group = 2, 1, None
+    monkeypatch.setattr(ling_ep.dist, "all_to_all_single", lambda output, value, **kwargs: output.copy_(value))
+    monkeypatch.setattr(ling_ep, "all_to_all_single_autograd", lambda value, *args: value)
+    original_index_copy = torch.Tensor.index_copy
+
+    def checked_index_copy(self, dim, index, source):
+        assert index.numel(), "Empty index_copy is unsafe on Ascend."
+        return original_index_copy(self, dim, index, source)
+
+    monkeypatch.setattr(torch.Tensor, "index_copy", checked_index_copy)
+    x = torch.randn(1, 3, 4, requires_grad=True)
+    actual, _ = ling_ep.ling_experts_forward(block, x)
+
+    torch.testing.assert_close(actual, block.experts["0"](x))
+    actual.sum().backward()
+    assert block.experts["1"].weight.grad is not None
+    assert torch.count_nonzero(block.experts["1"].weight.grad) == 0
 
 
 def test_fsdpturbo_sets_public_efsdp_gradient_divide_factor(monkeypatch):

@@ -1,0 +1,37 @@
+model: /home/rose/.cache/llamafactory/models/Ling-3.0-tiny-fx-compat
+model_class: llm
+trust_remote_code: true
+flash_attn: eager
+
+# PEFT Configuration
+peft_config:
+  name: lora
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules: all
+
+# Kernel Config
+kernel_config:
+  name: auto
+
+# FSDP Config
+dist_config:
+  name: fsdpturbo
+  ep_size: 2
+  ep_dispatcher: ling
+  dcp_path: null
+
+### data
+train_dataset: data/v1_sft_demo.yaml
+
+### training
+output_dir: ./outputs/ling_fsdpturbo_ep_lora
+micro_batch_size: 1
+cutoff_len: 2048
+learning_rate: 1.0e-4
+max_steps: 3
+
+### sample
+sample_backend: hf
+max_new_tokens: 128

@@ -118,13 +118,13 @@ class FSDPTurboDistributed(BaseDistributed):
 
     @staticmethod
     def save_model(model, output_dir, processor) -> None:
-        from .fsdp2 import save_model
+        from .fsdpturbo import save_model
 
         save_model(model, output_dir, processor)
 
     @staticmethod
     def save_checkpoint(model, optimizer, ckpt_dir, **kwargs) -> None:
-        from .fsdp2 import save_checkpoint
+        from .fsdpturbo import save_checkpoint
 
         save_checkpoint(model, optimizer, ckpt_dir, **kwargs)
 
