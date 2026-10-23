@@ -1,0 +1,39 @@
+model: /home/rose/models/Ling-3.0-tiny-stacked
+model_class: llm
+trust_remote_code: true
+flash_attn: eager
+
+# PEFT Configuration
+peft_config:
+  name: lora
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules: all
+
+# Kernel Config
+kernel_config:
+  name: auto
+
+# FSDP Config
+dist_config:
+  name: fsdpturbo
+  ep_size: 2
+  ep_dispatcher: eager
+  dcp_path: null
+
+### data
+train_dataset: data/v1_sft_demo.yaml
+
+### training
+output_dir: /home/rose/models/Ling-3.0-tiny-stacked-lora
+micro_batch_size: 1
+global_batch_size: 2
+cutoff_len: 2048
+learning_rate: 1.0e-4
+max_steps: 3
+logging_steps: 1
+
+### sample
+sample_backend: hf
+max_new_tokens: 128
