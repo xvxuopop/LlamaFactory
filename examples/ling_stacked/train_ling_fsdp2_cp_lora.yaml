@@ -1,0 +1,30 @@
+# A converted checkpoint containing this repository's updated modeling/configuration files.
+model: /home/jyx/models/Ling-3.0-tiny-stacked-cp
+model_class: llm
+trust_remote_code: true
+flash_attn: flash_attention_2
+
+peft_config:
+  name: lora
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules: all
+
+dist_config:
+  name: fsdp2
+  dcp_path: null
+cp_mode: ulysses
+cp_size: 2
+
+train_dataset: data/v1_sft_demo.yaml
+output_dir: outputs/ling_stacked_cp_lora
+micro_batch_size: 1
+global_batch_size: 1
+batching_workers: 0
+cutoff_len: 2048
+learning_rate: 1.0e-4
+max_steps: 3
+logging_steps: 1
+bf16: true
+enable_activation_checkpointing: true

@@ -21,6 +21,7 @@ from ....utils.constants import IGNORE_INDEX
 from ....utils.plugin import BasePlugin
 from .batch import prepare_sequence_parallel_batch
 from .gdn_attention import apply_gdn_attention
+from .kda_attention import apply_kda_attention
 from .ulysses import apply_ulysses_attention
 
 
@@ -42,6 +43,7 @@ def apply_sequence_parallel(model, cp_size: int):
     group = DistributedInterface().get_group(Dim.CP)
     apply_ulysses_attention(model, cp_size, group)
     apply_gdn_attention(model, cp_size)
+    apply_kda_attention(model, cp_size)
 
 
 @SequenceParallelLossPlugin("sequence_parallel_loss").register()

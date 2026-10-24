@@ -236,6 +236,7 @@ def new_flash_attn_forward(
             dropout_p=dropout,
             causal=is_causal,
             position_ids=kwargs.get("position_ids", None),
+            softmax_scale=kwargs.get("softmax_scale", None),
             target_dtype=target_dtype,
         )
     else:
