@@ -155,6 +155,10 @@ class BaseTrainer:
                 )
 
             SequenceParallelModelPlugin(self.args.cp_mode)(model, self.args.cp_size)
+        elif self.args.batching_strategy in (BatchingStrategy.PADDING_FREE, BatchingStrategy.DYNAMIC_PADDING_FREE):
+            from ..plugins.model_plugins.parallelization.kda_attention import apply_kda_attention
+
+            apply_kda_attention(model, cp_size=1)
 
     def _create_batch_generator(self) -> None:
         if (
