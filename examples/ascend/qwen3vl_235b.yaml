@@ -1,0 +1,51 @@
+### model
+# Downloaded from ModelScope and verified locally.
+model_name_or_path: /mnt/share/j30074199/models/Qwen3-VL-235B-A22B-Instruct
+image_max_pixels: 262144
+video_max_pixels: 16384
+trust_remote_code: true
+use_v1_kernels: true  # Ascend RMSNorm, RoPE, SwiGLU and MoE kernels.
+flash_attn: fa2
+
+### method
+stage: sft
+do_train: true
+finetuning_type: lora
+deepspeed: examples/deepspeed/ds_z3_config.json
+lora_rank: 8
+lora_target: all  # Linear modules only; stacked MoE expert parameters stay frozen.
+freeze_vision_tower: true
+freeze_multi_modal_projector: true
+disable_gradient_checkpointing: false
+
+### dataset
+dataset: mllm_demo
+dataset_dir: data
+template: qwen3_vl_nothink
+cutoff_len: 1024
+overwrite_cache: true
+preprocessing_num_workers: 1  # Avoid datasets 4.0.0 multiprocessing environment-state bug.
+dataloader_num_workers: 0
+
+### output
+output_dir: saves/qwen3-vl-235b-a22b/lora/zero3_demo
+logging_steps: 1
+save_steps: 5
+save_total_limit: 1
+plot_loss: true
+overwrite_output_dir: true
+save_only_model: true
+report_to: none  # choices: [none, wandb, tensorboard, swanlab, mlflow]
+
+### train
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 1
+max_steps: 2  # Short validation run with the six local multimodal demo samples.
+learning_rate: 1.0e-5
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+pure_bf16: false  # pure_bf16 is incompatible with ZeRO-3.
+ddp_timeout: 1800
+resume_from_checkpoint: null
+seed: 1234

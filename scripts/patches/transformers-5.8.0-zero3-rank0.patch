@@ -1,0 +1,90 @@
+--- a/transformers/integrations/deepspeed.py
++++ b/transformers/integrations/deepspeed.py
+@@ -455,9 +455,40 @@
+     if load_config is not None:
+         weight_mapping = getattr(load_config, "weight_mapping", None)
+ 
+-    # Apply weight conversions if provided
++    # Only rank 0 loads parameter data inside GatheredParameters. Keep conversion
++    # allocations on that rank as well: a full converted MoE checkpoint on every
++    # rank can exceed host memory even when the ZeRO-3 parameter shards fit.
++    rank = torch.distributed.get_rank()
++    world_size = torch.distributed.get_world_size()
++    broadcast_device = None
++    if world_size > 1:
++        if torch.distributed.get_backend() == "gloo":
++            broadcast_device = torch.device("cpu")
++        else:
++            from deepspeed.accelerator import get_accelerator
++
++            broadcast_device = torch.device(get_accelerator().current_device_name())
++
++    # Apply weight conversions if provided. Broadcast failures along with keys
++    # so peers do not proceed into unmatched parameter-gather collectives.
+     if weight_mapping is not None and len(weight_mapping) > 0:
+-        state_dict = _apply_weight_conversions_to_state_dict(model_to_load, state_dict, weight_mapping)
++        conversion_status = [None]
++        conversion_error = None
++        if rank == 0:
++            try:
++                state_dict = _apply_weight_conversions_to_state_dict(model_to_load, state_dict, weight_mapping)
++                conversion_status[0] = {"keys": list(state_dict), "error": None}
++            except Exception as exc:
++                conversion_error = exc
++                conversion_status[0] = {"keys": None, "error": f"{type(exc).__name__}: {exc}"}
++        if world_size > 1:
++            torch.distributed.broadcast_object_list(conversion_status, src=0, device=broadcast_device)
++        if conversion_status[0]["error"] is not None:
++            raise RuntimeError(f"ZeRO-3 rank 0 weight conversion failed: {conversion_status[0]['error']}") from conversion_error
++        if rank != 0:
++            # Only membership is needed on peers; parameter values arrive through
++            # GatheredParameters and buffer values are broadcast below.
++            state_dict = dict.fromkeys(conversion_status[0]["keys"])
+         # Keep the current weight conversion mapping for later saving (in case it was coming directly from the user)
+         model_to_load._weight_conversions = weight_mapping
+ 
+@@ -501,17 +532,28 @@
+                 # manager gathers (unpartitions) the params of the current layer, then loads from
+                 # the state dict and then re-partitions them again
+                 with deepspeed.zero.GatheredParameters(params_to_gather, modifier_rank=0):
+-                    if torch.distributed.get_rank() == 0:
++                    if rank == 0:
+                         module._load_from_state_dict(*args)
+-
+-            # Buffers are not partitioned by ZeRO-3, load them directly
++                # Release this module's converted tensors after repartitioning.
++                for k in named_parameters:
++                    state_dict.pop(k, None)
++
++            # Buffers are not partitioned by ZeRO-3. Load on rank 0 and broadcast
++            # them, including buffers that reside on CPU with an accelerator PG.
+             named_buffers = dict(module.named_buffers(prefix=prefix[:-1], recurse=False))
+             for k, buf in named_buffers.items():
+                 if k in state_dict and buf is not None:
+                     missing_keys.discard(k)
+                     with torch.no_grad():
+-                        buf.copy_(state_dict[k])
++                        if rank == 0:
++                            buf.copy_(state_dict[k])
++                        if world_size > 1:
++                            buffer_tensor = buf.to(broadcast_device)
++                            torch.distributed.broadcast(buffer_tensor, src=0)
++                            if buffer_tensor is not buf:
++                                buf.copy_(buffer_tensor)
+                     buf._is_hf_initialized = True
++                    state_dict.pop(k, None)
+ 
+         for name, child in module._modules.items():
+             if child is not None:
+--- a/transformers/core_model_loading.py
++++ b/transformers/core_model_loading.py
+@@ -281,7 +281,8 @@
+         # In this case, check the shapes before transposing
+         else:
+             # NOTE: this rely on the first param name, so cannot be used for many-to-one operation
+-            expected_shape = kwargs["model"].get_parameter(kwargs["full_layer_name"]).shape
++            parameter = kwargs["model"].get_parameter(kwargs["full_layer_name"])
++            expected_shape = getattr(parameter, "ds_shape", parameter.shape)
+             # The shapes are the same: do NOT transpose
+             if tensor.shape == expected_shape:
+                 return {target_pattern: tensor}
