@@ -1,0 +1,105 @@
+{
+  "full_model_run": {
+    "world_size": 4,
+    "visible_devices": [
+      10,
+      11,
+      12,
+      13
+    ],
+    "ranks_completed": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "steps_per_rank": {
+      "0": [
+        1,
+        2
+      ],
+      "1": [
+        1,
+        2
+      ],
+      "2": [
+        1,
+        2
+      ],
+      "3": [
+        1,
+        2
+      ]
+    },
+    "converted_tensors": 188,
+    "streaming_modules_loaded": 94,
+    "rank0_conversion_max_sampled_RssAnon_GiB": 6.107654571533203,
+    "rank0_start_to_training_seconds": 425.0,
+    "training_peak_allocated_GiB_per_rank_max": 13.7327241897583,
+    "training_peak_reserved_GiB_per_rank_max": 23.3828125,
+    "system_MemAvailable_initial_GiB": 2179.632652282715,
+    "system_MemAvailable_lowest_GiB": 1573.0968284606934,
+    "system_MemAvailable_max_observed_drop_GiB": 606.5358238220215,
+    "host_memory_measurement_note": "System-wide observation on a shared host; not a strict process budget or a 984-GiB limit test.",
+    "train_metrics": {
+      "epoch": 2.0,
+      "total_flos": 86554533888.0,
+      "train_loss": 3.302229404449463,
+      "train_runtime": 95.5993,
+      "train_samples_per_second": 0.669,
+      "train_steps_per_second": 0.021
+    },
+    "adapter_bytes": 406699760,
+    "adapter_tensors": 752,
+    "adapter_parameters": 203292672,
+    "adapter_all_finite": true,
+    "lora_B_tensors": 376,
+    "lora_B_all_updated": true,
+    "source_files_checked": 239,
+    "source_files_changed": [],
+    "runtime_overlay": "/home/j30074199/tasks/llamafactory_unpacked/LlamaFactory/examples/ascend/transformers_5_8_0_streaming/integrations/deepspeed.py",
+    "loader_sha256": "cf96773121602fa4deb2f20efea24822df36c711ffba71c7d324dd138963f622",
+    "limitations": [
+      "Four NPU ranks, not sixteen.",
+      "Six short multimodal demo samples, not full 20480-token sequences."
+    ],
+    "supervisor": {
+      "returncode": 0,
+      "stop_reason": null,
+      "elapsed_seconds": 560.641211271286,
+      "process_group_peak_pss_GiB": 431.6039791107178
+    }
+  },
+  "unit_tests": {
+    "passed": 9,
+    "log": "/mnt/share/j30074199/models/runs/zero3_streaming_validation/20261103_145328/unit_tests.log"
+  },
+  "two_npu_smoke": [
+    {
+      "rank": 0,
+      "world_size": 2,
+      "losses": [
+        0.00015187356621026993,
+        0.00015187356621026993
+      ],
+      "exact_loaded_weights": true,
+      "distributed_failure_propagated": true,
+      "cpu_offload": true,
+      "optimizer_updated": true
+    },
+    {
+      "rank": 1,
+      "world_size": 2,
+      "losses": [
+        0.00015187356621026993,
+        0.00015187356621026993
+      ],
+      "exact_loaded_weights": true,
+      "distributed_failure_propagated": true,
+      "cpu_offload": true,
+      "optimizer_updated": true
+    }
+  ],
+  "all_runtime_overlay_hashes_match": true,
+  "full_run_log": "/mnt/share/j30074199/models/runs/zero3_streaming_validation/20261103_145328/run235b_4card/train.log"
+}

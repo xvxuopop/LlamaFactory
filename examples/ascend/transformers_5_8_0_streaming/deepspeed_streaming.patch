@@ -1,0 +1,289 @@
+--- a/transformers/integrations/deepspeed.py
++++ b/transformers/integrations/deepspeed.py
+@@ -432,6 +432,86 @@
+     return new_state_dict
+ 
+ 
++def _build_zero3_streaming_conversion_plan(model, source_keys, weight_mapping):
++    """Plan one-to-one renames/transposes without materializing converted tensors.
++
++    More complex conversions retain the existing eager loader. In particular,
++    fusion/splitting operations may span modules and cannot be streamed using
++    this module-local plan without changing their dependency order.
++    """
++    from ..core_model_loading import Transpose, WeightConverter, WeightRenaming, dot_natural_key, rename_source_key
++
++    renamings = [entry for entry in weight_mapping if isinstance(entry, WeightRenaming)]
++    converters = [entry for entry in weight_mapping if isinstance(entry, WeightConverter)]
++    if len(renamings) + len(converters) != len(weight_mapping):
++        return None
++    if any(
++        len(converter.source_patterns) != 1
++        or len(converter.target_patterns) != 1
++        or len(converter.operations) != 1
++        or not isinstance(converter.operations[0], Transpose)
++        or converter.quantization_operation is not None
++        or converter.distributed_operation is not None
++        for converter in converters
++    ):
++        return None
++
++    ds_config = deepspeed_config() or {}
++    inference_config = ds_config.get("inference", {})
++    tp_size = ds_config.get("tensor_parallel", {}).get("autotp_size", 1)
++    if isinstance(inference_config, dict):
++        tp_size = max(tp_size, inference_config.get("tensor_parallel", {}).get("tp_size", 1))
++    if tp_size > 1:
++        return None  # The eager path reports the existing unsupported-TP error.
++
++    model_state = model.state_dict()
++    if any(not isinstance(value, torch.Tensor) for value in model_state.values()):
++        return None  # Preserve custom extra-state loading on the eager path.
++    by_pattern = {pattern: converter for converter in converters for pattern in converter.source_patterns}
++    plan = {}
++    for source_key in sorted(source_keys, key=dot_natural_key):
++        target_key, source_pattern = rename_source_key(
++            source_key, renamings, converters, model.base_model_prefix, model_state
++        )
++        if target_key not in model_state:
++            continue
++        if target_key in plan:
++            return None  # Several sources for one target require the eager collector.
++        plan[target_key] = (source_key, source_pattern, by_pattern.get(source_pattern))
++    return plan
++
++
++def _convert_zero3_module_state_dict(model, keys, source_state_dict, conversion_plan):
++    """Materialize at most one module's converted checkpoint tensors on rank 0."""
++    from ..core_model_loading import WeightConverter
++
++    result = {}
++    for target_key in keys:
++        source_key, source_pattern, converter = conversion_plan[target_key]
++        tensor = source_state_dict.pop(source_key)
++        if converter is None:
++            result[target_key] = tensor
++            continue
++        mapping = WeightConverter(
++            source_patterns=converter.source_patterns,
++            target_patterns=converter.target_patterns,
++            operations=converter.operations,
++        )
++        mapping.add_tensor(target_key, source_key, source_pattern, tensor)
++        realized = mapping.convert(target_key, model=model, config=model.config)
++        if set(realized) != {target_key}:
++            raise RuntimeError(
++                f"Streaming conversion for '{target_key}' produced unexpected targets: {list(realized)}"
++            )
++        value = realized[target_key]
++        if isinstance(value, list):
++            if len(value) != 1:
++                raise RuntimeError(f"Streaming conversion for '{target_key}' produced {len(value)} tensors")
++            value = value[0]
++        result[target_key] = value
++    return result
++
++
+ def _load_state_dict_into_zero3_model(model_to_load, state_dict, load_config=None):
+     """
+     Loads state dict into a model specifically for Zero3, since DeepSpeed does not support the `transformers`
+@@ -461,13 +541,22 @@
+     rank = torch.distributed.get_rank()
+     world_size = torch.distributed.get_world_size()
+     broadcast_device = None
+-    if world_size > 1:
+-        if torch.distributed.get_backend() == "gloo":
++    if torch.distributed.get_backend() == "gloo":
++        if world_size > 1:
+             broadcast_device = torch.device("cpu")
+-        else:
+-            from deepspeed.accelerator import get_accelerator
+-
+-            broadcast_device = torch.device(get_accelerator().current_device_name())
++    else:
++        from deepspeed.accelerator import get_accelerator
++
++        # Initialization can leave a large unused allocator cache. Release it
++        # once, on every rank, before checkpoint-loading communication begins.
++        accelerator = get_accelerator()
++        accelerator.empty_cache()
++        if world_size > 1:
++            broadcast_device = torch.device(accelerator.current_device_name())
++
++    streaming = False
++    conversion_plan = None
++    source_state_dict = None
+ 
+     # Apply weight conversions if provided. Broadcast failures along with keys
+     # so peers do not proceed into unmatched parameter-gather collectives.
+@@ -476,15 +565,28 @@
+         conversion_error = None
+         if rank == 0:
+             try:
+-                state_dict = _apply_weight_conversions_to_state_dict(model_to_load, state_dict, weight_mapping)
+-                conversion_status[0] = {"keys": list(state_dict), "error": None}
++                conversion_plan = _build_zero3_streaming_conversion_plan(model_to_load, state_dict, weight_mapping)
++                if conversion_plan is None:
++                    logger.info("Using eager ZeRO-3 weight conversion for non-module-local conversion operations.")
++                    state_dict = _apply_weight_conversions_to_state_dict(model_to_load, state_dict, weight_mapping)
++                else:
++                    source_state_dict = state_dict
++                    state_dict = dict.fromkeys(conversion_plan)
++                conversion_status[0] = {
++                    "keys": list(state_dict),
++                    "streaming": conversion_plan is not None,
++                    "error": None,
++                }
+             except Exception as exc:
+                 conversion_error = exc
+                 conversion_status[0] = {"keys": None, "error": f"{type(exc).__name__}: {exc}"}
+         if world_size > 1:
+             torch.distributed.broadcast_object_list(conversion_status, src=0, device=broadcast_device)
+         if conversion_status[0]["error"] is not None:
+-            raise RuntimeError(f"ZeRO-3 rank 0 weight conversion failed: {conversion_status[0]['error']}") from conversion_error
++            raise RuntimeError(
++                f"ZeRO-3 rank 0 weight conversion failed: {conversion_status[0]['error']}"
++            ) from conversion_error
++        streaming = conversion_status[0]["streaming"]
+         if rank != 0:
+             # Only membership is needed on peers; parameter values arrive through
+             # GatheredParameters and buffer values are broadcast below.
+@@ -498,18 +600,32 @@
+ 
+     prefix_model = getattr(model_to_load, "base_model_prefix", None)
+     # take care of the case where in the checkpoint we don't have the prefix
+-    state_dict = {
+-        (f"{prefix_model}.{k}" if meta_model_state_dict.get(f"{prefix_model}.{k}") is not None else k): v
+-        for k, v in state_dict.items()
+-    }
++    if not streaming:
++        state_dict = {
++            (f"{prefix_model}.{k}" if meta_model_state_dict.get(f"{prefix_model}.{k}") is not None else k): v
++            for k, v in state_dict.items()
++        }
++
++    converted_tensors = 0
++    total_conversions = (
++        sum(entry[2] is not None for entry in conversion_plan.values()) if rank == 0 and streaming else 0
++    )
++    if rank == 0 and streaming:
++        logger.info("Using module-wise streaming ZeRO-3 weight conversion for %d tensors.", total_conversions)
++
++    def synchronize_load_error(message, exception=None):
++        status = [message]
++        if world_size > 1:
++            torch.distributed.broadcast_object_list(status, src=0, device=broadcast_device)
++        if status[0] is not None:
++            raise RuntimeError(status[0]) from exception
+ 
+     # PyTorch's `_load_from_state_dict` does not copy parameters in a module's descendants
+     # so we need to apply the function recursively.
+     def load(module: nn.Module, state_dict, prefix="", assign_to_params_buffers=False):
++        nonlocal converted_tensors
+         local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
+         local_metadata["assign_to_params_buffers"] = assign_to_params_buffers
+-
+-        args = (state_dict, prefix, local_metadata, True, [], [], error_msgs)
+         # Parameters of module and children will start with prefix. We can exit early if there are none in this
+         # state_dict
+         if is_deepspeed_zero3_enabled():
+@@ -518,6 +634,26 @@
+             # In sharded models, each shard has only part of the full state_dict, so only gather
+             # parameters that are in the current state_dict.
+             named_parameters = dict(module.named_parameters(prefix=prefix[:-1], recurse=False))
++            named_buffers = dict(module.named_buffers(prefix=prefix[:-1], recurse=False))
++            module_keys = [key for key in (*named_parameters, *named_buffers) if key in state_dict]
++            module_state_dict = state_dict
++            if streaming and module_keys:
++                conversion_error = None
++                message = None
++                module_state_dict = {}
++                if rank == 0:
++                    try:
++                        module_state_dict = _convert_zero3_module_state_dict(
++                            model_to_load, module_keys, source_state_dict, conversion_plan
++                        )
++                    except Exception as exc:
++                        conversion_error = exc
++                        message = f"ZeRO-3 rank 0 module conversion failed for '{prefix}': {type(exc).__name__}: {exc}"
++                # Every rank learns about conversion failures before entering
++                # GatheredParameters; peers must not wait in an unmatched gather.
++                synchronize_load_error(message, conversion_error)
++
++            args = (module_state_dict, prefix, local_metadata, True, [], [], error_msgs)
+             params_to_gather = []
+             for k in named_parameters:
+                 if k in state_dict:
+@@ -531,22 +667,35 @@
+                 # because zero3 puts placeholders in model params, this context
+                 # manager gathers (unpartitions) the params of the current layer, then loads from
+                 # the state dict and then re-partitions them again
++                load_exception = None
++                message = None
+                 with deepspeed.zero.GatheredParameters(params_to_gather, modifier_rank=0):
+                     if rank == 0:
+-                        module._load_from_state_dict(*args)
++                        try:
++                            module._load_from_state_dict(*args)
++                        except Exception as exc:
++                            load_exception = exc
++                            message = f"ZeRO-3 rank 0 module load failed for '{prefix}': {type(exc).__name__}: {exc}"
++                synchronize_load_error(message, load_exception)
+                 # Release this module's converted tensors after repartitioning.
+                 for k in named_parameters:
+                     state_dict.pop(k, None)
+ 
+             # Buffers are not partitioned by ZeRO-3. Load on rank 0 and broadcast
+             # them, including buffers that reside on CPU with an accelerator PG.
+-            named_buffers = dict(module.named_buffers(prefix=prefix[:-1], recurse=False))
+             for k, buf in named_buffers.items():
+                 if k in state_dict and buf is not None:
+                     missing_keys.discard(k)
+                     with torch.no_grad():
++                        buffer_exception = None
++                        message = None
+                         if rank == 0:
+-                            buf.copy_(state_dict[k])
++                            try:
++                                buf.copy_(module_state_dict[k])
++                            except Exception as exc:
++                                buffer_exception = exc
++                                message = f"ZeRO-3 rank 0 buffer load failed for '{k}': {type(exc).__name__}: {exc}"
++                        synchronize_load_error(message, buffer_exception)
+                         if world_size > 1:
+                             buffer_tensor = buf.to(broadcast_device)
+                             torch.distributed.broadcast(buffer_tensor, src=0)
+@@ -555,11 +704,33 @@
+                     buf._is_hf_initialized = True
+                     state_dict.pop(k, None)
+ 
++            if streaming and module_keys:
++                # Clear before recursing, rather than retaining every ancestor's
++                # converted tensors on the Python call stack.
++                module_state_dict.clear()
++                if rank == 0:
++                    count = sum(conversion_plan[key][2] is not None for key in module_keys)
++                    converted_tensors += count
++                    if count:
++                        logger.info(
++                            "ZeRO-3 streaming loaded %s (%d/%d converted tensors).",
++                            prefix.rstrip("."),
++                            converted_tensors,
++                            total_conversions,
++                        )
++
+         for name, child in module._modules.items():
+             if child is not None:
+                 load(child, state_dict, prefix + name + ".", assign_to_params_buffers)
+ 
+     load(model_to_load, state_dict, assign_to_params_buffers=False)
++
++    # PyTorch records size/copy errors in error_msgs instead of raising them.
++    # Return the same errors on peers so all ranks fail the outer loader together.
++    if world_size > 1:
++        status = [error_msgs if rank == 0 else None]
++        torch.distributed.broadcast_object_list(status, src=0, device=broadcast_device)
++        error_msgs = status[0]
+ 
+     return error_msgs, missing_keys
+ 

@@ -1,0 +1,144 @@
+{
+  "environment": {
+    "torch_npu": "2.10.0.post2",
+    "datasets": "4.0.0",
+    "accelerate": "1.11.0",
+    "transformers": "5.8.0",
+    "python": "3.12"
+  },
+  "environment_reproduction_and_fix": [
+    {
+      "fixed": false,
+      "workers": 1,
+      "worker_pids": [
+        2495105
+      ],
+      "environment_object_replaced": false,
+      "direct_value": "true",
+      "get_value": "true",
+      "getenv_value": "true",
+      "deepspeed_plugin_present": true,
+      "mixed_precision": "bf16",
+      "log": "/mnt/share/j30074199/models/runs/npu_preprocessing_env_fix/20261103_192948/environment_original_workers1.log"
+    },
+    {
+      "fixed": false,
+      "workers": 4,
+      "worker_pids": [
+        2472083,
+        2472085,
+        2472087,
+        2472089
+      ],
+      "environment_object_replaced": true,
+      "direct_value": "true",
+      "get_value": null,
+      "getenv_value": null,
+      "deepspeed_plugin_present": false,
+      "error": "'AcceleratorState' object has no attribute 'mixed_precision'",
+      "inner_error": "'NoneType' object has no attribute 'deepspeed_config'",
+      "log": "/mnt/share/j30074199/models/runs/npu_preprocessing_env_fix/20261103_192948/environment_original_workers4.log"
+    },
+    {
+      "fixed": true,
+      "workers": 4,
+      "worker_pids": [
+        2497251,
+        2497253,
+        2497255,
+        2497258
+      ],
+      "environment_object_replaced": true,
+      "direct_value": "true",
+      "get_value": "true",
+      "getenv_value": "true",
+      "deepspeed_plugin_present": true,
+      "mixed_precision": "bf16",
+      "log": "/mnt/share/j30074199/models/runs/npu_preprocessing_env_fix/20261103_192948/environment_fixed_workers4.log"
+    },
+    {
+      "fixed": true,
+      "workers": 8,
+      "worker_pids": [
+        2497264,
+        2497268,
+        2497274,
+        2497277,
+        2497282,
+        2497286,
+        2497289,
+        2497293
+      ],
+      "environment_object_replaced": true,
+      "direct_value": "true",
+      "get_value": "true",
+      "getenv_value": "true",
+      "deepspeed_plugin_present": true,
+      "mixed_precision": "bf16",
+      "log": "/mnt/share/j30074199/models/runs/npu_preprocessing_env_fix/20261103_192948/environment_fixed_workers8.log"
+    }
+  ],
+  "state_test_scope": "Actual Dataset.map workers and actual AcceleratorState initialization; CPU PartialState with DeepSpeed distributed_type set for the state branch; no NPU or process group initialization.",
+  "multimodal": {
+    "cases": [
+      {
+        "requested_workers": 1,
+        "rows": 6,
+        "token_lengths": [
+          184,
+          122,
+          170,
+          182,
+          124,
+          163
+        ],
+        "exact_match_to_single_process": true,
+        "elapsed_seconds": 1.2235378790646791
+      },
+      {
+        "requested_workers": 4,
+        "rows": 6,
+        "token_lengths": [
+          184,
+          122,
+          170,
+          182,
+          124,
+          163
+        ],
+        "exact_match_to_single_process": true,
+        "elapsed_seconds": 7.178240389097482
+      },
+      {
+        "requested_workers": 8,
+        "rows": 6,
+        "token_lengths": [
+          184,
+          122,
+          170,
+          182,
+          124,
+          163
+        ],
+        "exact_match_to_single_process": true,
+        "elapsed_seconds": 9.688346960116178
+      }
+    ],
+    "tokenized_cache_reload_equal": true,
+    "cache_reload_seconds": 0.008054686011746526,
+    "loaded_model_weights": false,
+    "training_launched": false
+  },
+  "source_integrity": {
+    "checked_files": 241,
+    "changed_files": []
+  },
+  "installed_package_modified": false,
+  "installer_check_only_passed": true,
+  "limitations": [
+    "No full 235B training rerun.",
+    "Other-machine category_train data unavailable.",
+    "Six demo samples do not measure large-dataset preprocessing throughput."
+  ],
+  "run_directory": "/mnt/share/j30074199/models/runs/npu_preprocessing_env_fix/20261103_192948"
+}
