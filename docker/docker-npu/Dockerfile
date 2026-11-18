@@ -41,6 +41,9 @@ RUN pip install --no-cache-dir -r requirements/deepspeed.txt
 RUN pip install --no-cache-dir -e . --no-build-isolation && \
     pip install --no-cache-dir -r requirements/metrics.txt --no-build-isolation
 
+# Install the pinned FSDPTurbo backend while preserving the existing runtime dependencies.
+RUN pip install --no-cache-dir --no-deps -r requirements/fsdpturbo.txt
+
 # Set up volumes
 # VOLUME [ "/root/.cache/huggingface", "/app/shared_data", "/app/output" ]
 
